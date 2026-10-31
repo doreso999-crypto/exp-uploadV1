@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Experian Client Data Parser & Autofill
 // @namespace    CRC Tools
-// @version      3.0
+// @version      3.1
 // @description  Paste, parse, review, and fill Experian forms with validation and accessible notifications.
 // @match        https://*.experian.com/*
 // @grant        none
@@ -145,9 +145,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 #raw { display: block; width: 100%; min-height: 255px; padding: 13px; resize: vertical; border: 1px solid #cfd8e7; border-radius: 11px; background: #fff; color: var(--ink); font: 12px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace; }
 #raw::placeholder { color: #95a1b4; }
 .under-input { display: flex; justify-content: space-between; gap: 8px; margin-top: 9px; color: var(--muted); font-size: 10px; }
-.privacy-note { display: flex; gap: 10px; margin-top: 16px; padding: 13px; border: 1px solid #e4e9f4; border-radius: 11px; background: #f6f8fd; color: #5f6f87; font-size: 11px; }
-.privacy-note strong { color: #35455f; }
-.note-symbol { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #e5ebfc; color: var(--blue); font-size: 12px; font-weight: 800; }
 .action { min-height: 39px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-size: 12px; font-weight: 760; transition: background .15s ease, transform .15s ease; }
 .action:hover { background: #f5f7fc; }
 .action.primary { background: var(--blue); border-color: var(--blue); color: #fff; box-shadow: 0 4px 12px rgba(53, 89, 232, .15); }
@@ -174,13 +171,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 .required { color: var(--danger); }
 .field-control { position: relative; }
 .field input { width: 100%; min-height: 37px; padding: 8px 11px; border: 1px solid #d3dbe9; border-radius: 9px; background: #fff; color: var(--ink); font-size: 12px; outline: none; transition: border-color .15s ease, box-shadow .15s ease; }
+.field input.is-populated { border-color: #57b88a; background: #ebf9f1; color: #155c3c; box-shadow: inset 3px 0 0 #34a46e; }
+.field input.is-empty { border-color: #d5dbe4; background: #f1f3f6; color: #667085; }
 .field input:hover { border-color: #a4b3cd; }
 .field input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(53,89,232,.10); }
-.field input[aria-invalid="true"] { border-color: var(--danger); background: #fff9fa; }
+.field input[aria-invalid="true"] { border-color: var(--danger); background: #fff9fa; box-shadow: inset 3px 0 0 var(--danger); }
 .field .field-error { color: var(--danger); font-size: 10px; line-height: 1.3; }
 .field .hint { color: var(--muted); font-size: 10px; }
-.field .with-toggle { padding-right: 62px; }
-#toggle-ssn { position: absolute; right: 5px; top: 5px; height: 27px; padding: 0 9px; border: 0; background: #eef1f8; color: #485a74; border-radius: 6px; font-size: 10px; font-weight: 700; }
 #footer { display: flex; align-items: center; gap: 10px; padding: 15px 24px; border-top: 1px solid var(--line); background: #fff; }
 #form-state { flex: 1; min-width: 0; color: var(--muted); font-size: 11px; }
 #form-state strong { display: block; color: var(--body); font-size: 12px; }
@@ -260,7 +257,6 @@ SSN: 000-00-0000
 Email: jane@example.com"></textarea>
                 <div class="under-input"><span>Ctrl + Enter to parse</span><span id="char-count">0 characters</span></div>
                 <button class="action primary" id="parse" type="button">Parse client data</button>
-                <div class="privacy-note"><span class="note-symbol" aria-hidden="true">i</span><span><strong>Privacy:</strong> Parsed details are held only in this page session. No browser storage or extra network requests are used by this tool. Clear the panel after each client.</span></div>
             </section>
             <section class="review-pane" aria-labelledby="review-heading">
                 <h3 class="pane-title" id="review-heading">Review and edit</h3>
@@ -333,7 +329,7 @@ Email: jane@example.com"></textarea>
                 control.className = "field-control";
                 const input = document.createElement("input");
                 input.id = id;
-                input.type = fieldName === "ssn" ? "password" : fieldName === "email" ? "email" : "text";
+                input.type = fieldName === "email" ? "email" : "text";
                 input.autocomplete = "off";
                 input.spellcheck = false;
                 input.setAttribute("aria-describedby", id + "-error");
@@ -341,29 +337,16 @@ Email: jane@example.com"></textarea>
                     state: "e.g. WA", zip: "e.g. 98101", dob: "MM/DD/YYYY",
                     generation: "e.g. Jr", ssn: "000-00-0000", email: "name@example.com"
                 })[fieldName] || "";
-                if (fieldName === "ssn") input.className = "with-toggle";
                 if (["state", "zip", "ssn", "dob", "email"].includes(fieldName)) {
                     input.inputMode = ["zip", "ssn"].includes(fieldName) ? "numeric" : "text";
                 }
                 input.addEventListener("input", () => {
                     clearFieldError(fieldName);
+                    updateFieldAppearance(input);
                     if (reviewReady) setFormState("Reviewing changes", "Your edited values will be used when filling.");
                 });
+                updateFieldAppearance(input);
                 control.appendChild(input);
-                if (fieldName === "ssn") {
-                    const toggle = document.createElement("button");
-                    toggle.type = "button";
-                    toggle.id = "toggle-ssn";
-                    toggle.textContent = "Show";
-                    toggle.setAttribute("aria-label", "Show SSN");
-                    toggle.addEventListener("click", () => {
-                        const show = input.type === "password";
-                        input.type = show ? "text" : "password";
-                        toggle.textContent = show ? "Hide" : "Show";
-                        toggle.setAttribute("aria-label", show ? "Hide SSN" : "Show SSN");
-                    });
-                    control.appendChild(toggle);
-                }
                 const error = document.createElement("span");
                 error.className = "field-error";
                 error.id = id + "-error";
@@ -446,6 +429,12 @@ Email: jane@example.com"></textarea>
         input.setAttribute("aria-invalid", "true");
         error.textContent = message;
         error.hidden = false;
+    }
+
+    function updateFieldAppearance(input) {
+        const populated = Boolean(input.value.trim());
+        input.classList.toggle("is-populated", populated);
+        input.classList.toggle("is-empty", !populated);
     }
 
     function clearFieldError(name) {
@@ -603,12 +592,9 @@ Email: jane@example.com"></textarea>
     function loadReview(data) {
         for (const [field, input] of inputs) {
             input.value = data[field] || "";
+            updateFieldAppearance(input);
             clearFieldError(field);
         }
-        const ssn = inputs.get("ssn");
-        ssn.type = "password";
-        $("toggle-ssn").textContent = "Show";
-        $("toggle-ssn").setAttribute("aria-label", "Show SSN");
         reviewReady = true;
         reviewContent.hidden = false;
         emptyState.hidden = true;
@@ -752,8 +738,25 @@ Email: jane@example.com"></textarea>
         }
         if (data.dob) issues.push("Date of birth: no Experian field mapping configured; enter manually if needed.");
         const terms = getTarget(FIELD_IDS.terms);
-        if (terms instanceof HTMLInputElement && !terms.checked) {
-            issues.push("Terms & Conditions: review and accept manually.");
+        if (terms instanceof HTMLInputElement && terms.type === "checkbox") {
+            if (!terms.checked) {
+                if (terms.disabled) {
+                    issues.push("Terms & Conditions: checkbox is disabled.");
+                } else {
+                    try {
+                        terms.click();
+                        if (terms.checked) {
+                            succeeded.push("Terms & Conditions");
+                        } else {
+                            issues.push("Terms & Conditions: checkbox did not stay checked.");
+                        }
+                    } catch (_error) {
+                        issues.push("Terms & Conditions: unable to check the box.");
+                    }
+                }
+            }
+        } else {
+            issues.push("Terms & Conditions: checkbox not found on this page.");
         }
         return { succeeded, issues };
     }
@@ -775,10 +778,6 @@ Email: jane@example.com"></textarea>
         overlay.hidden = true;
         $("launcher").hidden = false;
         document.documentElement.style.overflow = wasPageOverflow;
-        const ssn = inputs.get("ssn");
-        ssn.type = "password";
-        $("toggle-ssn").textContent = "Show";
-        $("toggle-ssn").setAttribute("aria-label", "Show SSN");
         if (lastFocused && typeof lastFocused.focus === "function") lastFocused.focus();
         else $("launcher").focus();
     }
@@ -788,12 +787,9 @@ Email: jane@example.com"></textarea>
         $("char-count").textContent = "0 characters";
         for (const [name, input] of inputs) {
             input.value = "";
+            updateFieldAppearance(input);
             clearFieldError(name);
         }
-        const ssn = inputs.get("ssn");
-        ssn.type = "password";
-        $("toggle-ssn").textContent = "Show";
-        $("toggle-ssn").setAttribute("aria-label", "Show SSN");
         reviewReady = false;
         reviewContent.hidden = true;
         emptyState.hidden = false;
@@ -860,7 +856,7 @@ Email: jane@example.com"></textarea>
                 notify("success", "Experian form filled", summary + " Double-check details before submitting manually.");
             }
             setFormState("Filled: " + result.succeeded.length + " · Needs attention: " + result.issues.length,
-                "Review the Experian form. Submission and accepting terms are manual.");
+                "Review the Experian form. Submission remains manual.");
         } catch (_error) {
             showReviewMessage("Unexpected fill error. Confirm each field on the Experian page.", "error");
             notify("error", "Form update interrupted", "Check the Experian fields for partial changes.");
