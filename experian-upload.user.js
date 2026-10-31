@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Experian Client Data Parser & Autofill
 // @namespace    CRC Tools
-// @version      3.1
+// @version      3.2
 // @description  Paste, parse, review, and fill Experian forms with validation and accessible notifications.
 // @match        https://*.experian.com/*
 // @grant        none
@@ -73,6 +73,7 @@
     let lastFocused = null;
     let wasPageOverflow = "";
     let reviewReady = false;
+    let nameInterpretations = null;
     let currentToastTimer = null;
 
     const CSS = `
@@ -119,58 +120,58 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 }
 #dialog {
     display: flex; flex-direction: column;
-    width: min(1040px, 100%); max-height: min(790px, calc(100dvh - 48px));
+    width: min(1160px, 100%); max-height: calc(100dvh - 24px);
     overflow: hidden; border: 1px solid rgba(255,255,255,.75);
     border-radius: 20px; background: #fff; box-shadow: 0 32px 85px rgba(2, 12, 32, .33);
 }
-#header { display: flex; align-items: flex-start; gap: 16px; padding: 22px 26px 17px; }
+#header { display: flex; align-items: flex-start; gap: 12px; padding: 13px 19px 9px; }
 .title-wrap { flex: 1; min-width: 0; }
 .eyebrow { display: block; margin-bottom: 4px; color: var(--blue); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-#title { margin: 0; font-size: 23px; font-weight: 790; line-height: 1.25; letter-spacing: -.035em; }
-.subtitle { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
+#title { margin: 0; font-size: 20px; font-weight: 790; line-height: 1.2; letter-spacing: -.035em; }
+.subtitle { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
 .icon-button { display: grid; place-items: center; width: 34px; height: 34px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--body); font-size: 21px; line-height: 1; }
 .icon-button:hover { background: var(--soft); }
-.steps { display: flex; align-items: center; gap: 9px; padding: 0 26px 18px; border-bottom: 1px solid var(--line); }
+.steps { display: flex; align-items: center; gap: 8px; padding: 0 19px 9px; border-bottom: 1px solid var(--line); }
 .step { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; font-weight: 700; white-space: nowrap; }
 .step-number { display: grid; place-items: center; width: 23px; height: 23px; flex: 0 0 auto; border-radius: 50%; background: #edf1f7; color: #6a7990; font-size: 11px; }
 .step.active { color: var(--blue); }
 .step.active .step-number { color: #fff; background: var(--blue); }
 .step.done .step-number { color: #0e7657; background: #d7f6eb; }
 .step-divider { height: 1px; width: 18px; background: var(--line); }
-#workspace { display: grid; grid-template-columns: minmax(270px,.85fr) minmax(350px,1.15fr); min-height: 0; overflow: auto; }
-.paste-pane { padding: 24px; border-right: 1px solid var(--line); background: linear-gradient(180deg, #fafbff 0%, #fff 50%); }
-.review-pane { padding: 24px; min-width: 0; }
-.pane-title { margin: 0 0 4px; font-size: 15px; font-weight: 760; }
-.pane-desc { margin: 0 0 16px; color: var(--muted); font-size: 12px; }
-#raw { display: block; width: 100%; min-height: 255px; padding: 13px; resize: vertical; border: 1px solid #cfd8e7; border-radius: 11px; background: #fff; color: var(--ink); font: 12px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace; }
+#workspace { display: grid; grid-template-columns: minmax(250px,.72fr) minmax(500px,1.72fr); flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.paste-pane { padding: 14px 16px; min-width: 0; border-right: 1px solid var(--line); background: linear-gradient(180deg, #fafbff 0%, #fff 50%); }
+.review-pane { padding: 13px 16px; min-width: 0; }
+.pane-title { margin: 0 0 2px; font-size: 14px; font-weight: 760; }
+.pane-desc { margin: 0 0 9px; color: var(--muted); font-size: 11px; }
+#raw { display: block; width: 100%; height: clamp(160px, 30dvh, 240px); min-height: 100px; max-height: 38dvh; padding: 11px; resize: none; border: 1px solid #cfd8e7; border-radius: 11px; background: #fff; color: var(--ink); font: 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
 #raw::placeholder { color: #95a1b4; }
 .under-input { display: flex; justify-content: space-between; gap: 8px; margin-top: 9px; color: var(--muted); font-size: 10px; }
-.action { min-height: 39px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-size: 12px; font-weight: 760; transition: background .15s ease, transform .15s ease; }
+.action { min-height: 35px; padding: 0 13px; border-radius: 10px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-size: 12px; font-weight: 760; transition: background .15s ease, transform .15s ease; }
 .action:hover { background: #f5f7fc; }
 .action.primary { background: var(--blue); border-color: var(--blue); color: #fff; box-shadow: 0 4px 12px rgba(53, 89, 232, .15); }
 .action.primary:hover { background: var(--blue-dark); }
 .action.secondary { border-color: #ccd6ec; color: var(--blue); }
 .action.ghost { background: transparent; color: var(--muted); border-color: transparent; }
 .action.ghost:hover { background: #edf1f7; color: var(--ink); }
-#parse { width: 100%; margin-top: 16px; }
+#parse { width: 100%; margin-top: 10px; }
 #empty-state { display: grid; justify-items: center; text-align: center; padding: 55px 16px; border: 1px dashed #ccd6e7; border-radius: 14px; background: #fafbff; }
 .empty-art { display: grid; place-items: center; width: 55px; height: 55px; border: 1px solid #dfE6ff; border-radius: 17px; background: #edf1ff; color: var(--blue); font-size: 23px; margin-bottom: 14px; }
 #empty-state h3 { margin: 0 0 5px; font-size: 14px; }
 #empty-state p { margin: 0; max-width: 260px; color: var(--muted); font-size: 12px; }
-#review-message { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; margin-bottom: 16px; border: 1px solid #d9e9ff; background: #f0f6ff; border-radius: 10px; color: #365d91; font-size: 11px; }
+#review-message { display: flex; align-items: flex-start; gap: 7px; padding: 6px 9px; margin-bottom: 9px; border: 1px solid #d9e9ff; background: #f0f6ff; border-radius: 8px; color: #365d91; font-size: 10px; }
 #review-message.warning { color: #87530b; border-color: #f4dfb4; background: #fffaed; }
 #review-message.error { color: #a3243e; border-color: #f3c8d1; background: #fff3f5; }
 .message-icon { font-weight: 850; font-size: 14px; }
-.field-group { margin-bottom: 17px; }
+.field-group { margin-bottom: 8px; }
 .field-group:last-child { margin-bottom: 0; }
-.group-title { margin: 0 0 10px; color: #586b86; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-.field-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 11px; }
-.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.field.wide { grid-column: span 2; }
-.field label { color: #485a74; font-size: 11px; font-weight: 700; }
+.group-title { margin: 0 0 5px; color: #586b86; font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.field-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px 9px; }
+.field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.field.wide { grid-column: span 1; }
+.field label { color: #485a74; font-size: 10px; font-weight: 700; }
 .required { color: var(--danger); }
 .field-control { position: relative; }
-.field input { width: 100%; min-height: 37px; padding: 8px 11px; border: 1px solid #d3dbe9; border-radius: 9px; background: #fff; color: var(--ink); font-size: 12px; outline: none; transition: border-color .15s ease, box-shadow .15s ease; }
+.field input { width: 100%; height: 32px; min-height: 32px; padding: 5px 9px; border: 1px solid #d3dbe9; border-radius: 7px; background: #fff; color: var(--ink); font-size: 11px; outline: none; transition: border-color .15s ease, box-shadow .15s ease; }
 .field input.is-populated { border-color: #57b88a; background: #ebf9f1; color: #155c3c; box-shadow: inset 3px 0 0 #34a46e; }
 .field input.is-empty { border-color: #d5dbe4; background: #f1f3f6; color: #667085; }
 .field input:hover { border-color: #a4b3cd; }
@@ -178,7 +179,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 .field input[aria-invalid="true"] { border-color: var(--danger); background: #fff9fa; box-shadow: inset 3px 0 0 var(--danger); }
 .field .field-error { color: var(--danger); font-size: 10px; line-height: 1.3; }
 .field .hint { color: var(--muted); font-size: 10px; }
-#footer { display: flex; align-items: center; gap: 10px; padding: 15px 24px; border-top: 1px solid var(--line); background: #fff; }
+#footer { display: flex; align-items: center; gap: 9px; padding: 9px 16px; border-top: 1px solid var(--line); background: #fff; }
 #form-state { flex: 1; min-width: 0; color: var(--muted); font-size: 11px; }
 #form-state strong { display: block; color: var(--body); font-size: 12px; }
 .footer-actions { display: flex; gap: 8px; align-items: center; }
@@ -191,13 +192,25 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 .toast-copy { flex: 1; min-width: 0; color: var(--body); font-size: 11px; }
 .toast-title { display: block; margin-bottom: 3px; color: var(--ink); font-size: 12px; font-weight: 800; }
 .toast-close { border: 0; background: none; color: var(--muted); font-size: 17px; line-height: 1; }
+#name-assist { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 8px; padding: 5px 8px; margin: 0 0 8px; border: 1px solid #f1dfb7; background: #fffaf0; border-radius: 8px; color: #7f571b; font-size: 10px; }
+#name-assist strong { font-size: 10px; white-space: nowrap; }
+#name-options { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.name-option { border: 1px solid #d9c29b; border-radius: 6px; padding: 4px 8px; color: #775321; background: #fff; font-size: 10px; font-weight: 700; }
+.name-option[aria-pressed="true"] { background: #3559e8; border-color: #3559e8; color: #fff; }
+.name-option:hover { border-color: #3559e8; }
+@media (max-height: 670px) and (min-width: 761px) {
+    #workspace { overflow-y: auto; }
+}
+@media (min-width: 761px) and (max-width: 1050px) {
+    #workspace { grid-template-columns: minmax(220px,.7fr) minmax(440px,1.4fr); }
+}
 @media (max-width: 760px) {
     #overlay { padding: 10px; }
     #dialog { max-height: calc(100dvh - 20px); border-radius: 15px; }
     #header { padding: 17px 17px 12px; }
     #title { font-size: 20px; }
     .steps { padding: 0 17px 14px; }
-    #workspace { grid-template-columns: 1fr; }
+    #workspace { grid-template-columns: 1fr; overflow-y: auto; }
     .paste-pane { border-right: 0; border-bottom: 1px solid var(--line); padding: 17px; }
     .review-pane { padding: 17px; }
     #raw { min-height: 145px; }
@@ -216,6 +229,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
     .field-grid { grid-template-columns: 1fr; }
     .field.wide { grid-column: span 1; }
     .subtitle { font-size: 11px; }
+    #name-assist { align-items: flex-start; }
 }
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -268,6 +282,10 @@ Email: jane@example.com"></textarea>
                 </div>
                 <div id="review-content" hidden>
                     <div id="review-message" role="status"><span class="message-icon" aria-hidden="true">i</span><span id="review-message-text"></span></div>
+                    <div id="name-assist" hidden>
+                        <strong>Name split (verify):</strong>
+                        <div id="name-options" role="group" aria-label="Choose how to split an ambiguous full name"></div>
+                    </div>
                     <div id="review-fields"></div>
                 </div>
             </section>
@@ -343,6 +361,9 @@ Email: jane@example.com"></textarea>
                 input.addEventListener("input", () => {
                     clearFieldError(fieldName);
                     updateFieldAppearance(input);
+                    if (nameInterpretations && ["firstName", "middleName", "lastName"].includes(fieldName)) {
+                        $("name-options").querySelectorAll("button").forEach((button) => button.setAttribute("aria-pressed", "false"));
+                    }
                     if (reviewReady) setFormState("Reviewing changes", "Your edited values will be used when filling.");
                 });
                 updateFieldAppearance(input);
@@ -479,12 +500,54 @@ Email: jane@example.com"></textarea>
         if (!VALID_STATES.has(state)) return null;
         return { city: match[1].replace(/,\s*$/, "").trim(), state, zip: match[3] };
     }
+    // A three-part name cannot reliably reveal whether its second word is
+    // a compound given name, middle name, or part of a family name.
+    // Offer in-place interpretations rather than silently asserting one.
+    const COMPOUND_FIRST_NAMES = new Set([
+        "anne marie", "anna maria", "mary ann", "mary anne", "mary jane",
+        "mary grace", "mary rose", "maria clara", "marie claire",
+        "jean pierre", "john paul", "rose marie", "ann marie"
+    ]);
+    function nameInterpretationCandidates(line) {
+        const words = normalizeText(line).replace(/,/g, " ").split(" ").filter(Boolean);
+        if (words.length < 3) return null;
+        let generation = "";
+        if (SUFFIXES.has(words[words.length - 1].replace(/\./g, "").toUpperCase())) {
+            generation = words.pop();
+        }
+        if (words.length < 3) return null;
+        const choices = [
+            {
+                key: "middle",
+                label: "Middle word(s)",
+                values: { firstName: words[0], middleName: words.slice(1, -1).join(" "), lastName: words[words.length - 1], generation }
+            },
+            {
+                key: "firstTwo",
+                label: "First two words",
+                values: { firstName: words.slice(0, 2).join(" "), middleName: words.slice(2, -1).join(" "), lastName: words[words.length - 1], generation }
+            },
+            {
+                key: "lastTwo",
+                label: "Last two words",
+                values: { firstName: words[0], middleName: words.slice(1, -2).join(" "), lastName: words.slice(-2).join(" "), generation }
+            }
+        ];
+        const initial = COMPOUND_FIRST_NAMES.has(words.slice(0, 2).join(" ").toLowerCase())
+            ? "firstTwo" : "middle";
+        return { choices, initial };
+    }
     function parseName(line) {
+        const candidate = nameInterpretationCandidates(line);
+        if (candidate) {
+            return { ...candidate.choices.find((choice) => choice.key === candidate.initial).values };
+        }
         const words = normalizeText(line).split(" ").filter(Boolean);
         if (words.length < 2) return null;
         let generation = "";
-        const last = words[words.length - 1].replace(/\./g, "").toUpperCase();
-        if (SUFFIXES.has(last) && words.length > 2) generation = words.pop();
+        if (SUFFIXES.has(words[words.length - 1].replace(/\./g, "").toUpperCase()) && words.length > 2) {
+            generation = words.pop();
+        }
         if (words.length < 2) return null;
         return {
             firstName: words.shift(),
@@ -532,11 +595,15 @@ Email: jane@example.com"></textarea>
         const data = Object.fromEntries(Object.keys(LABELS).map((key) => [key, ""]));
         const lines = String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
         const rest = [];
+        let fullNameSource = "";
+        const explicitlyNamed = new Set();
         for (const line of lines) {
             const label = line.match(/^([^:=]{1,45})\s*[:=]\s*(.*)$/);
             if (label) {
                 const field = findField(label[1]);
                 if (field) {
+                    if (field === "fullName") fullNameSource = label[2];
+                    if (["firstName", "middleName", "lastName"].includes(field)) explicitlyNamed.add(field);
                     assignParsedField(data, field, label[2]);
                     continue;
                 }
@@ -563,6 +630,7 @@ Email: jane@example.com"></textarea>
                 const parsed = parseName(rest[index]);
                 if (parsed) {
                     Object.assign(data, parsed);
+                    fullNameSource = rest[index];
                     rest.splice(index, 1);
                 }
             }
@@ -581,6 +649,12 @@ Email: jane@example.com"></textarea>
                 break;
             }
         }
+        if (fullNameSource && !explicitlyNamed.has("firstName") && !explicitlyNamed.has("lastName")) {
+            Object.defineProperty(data, "nameSuggestions", {
+                value: nameInterpretationCandidates(fullNameSource),
+                enumerable: false
+            });
+        }
         return data;
     }
 
@@ -589,12 +663,49 @@ Email: jane@example.com"></textarea>
         for (const [field, input] of inputs) data[field] = input.value.trim();
         return data;
     }
+    function renderNameInterpretations(suggestions) {
+        const container = $("name-assist");
+        const buttons = $("name-options");
+        buttons.replaceChildren();
+        nameInterpretations = suggestions || null;
+        container.hidden = !suggestions;
+        if (!suggestions) return;
+        const syncButtons = (selected) => {
+            buttons.querySelectorAll("button").forEach((button) => {
+                button.setAttribute("aria-pressed", String(button.dataset.choice === selected));
+            });
+        };
+        for (const choice of suggestions.choices) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "name-option";
+            button.dataset.choice = choice.key;
+            button.textContent = choice.label;
+            button.title = "First: " + choice.values.firstName + " | Middle: " +
+                (choice.values.middleName || "(empty)") + " | Last: " + choice.values.lastName;
+            button.setAttribute("aria-label", button.title);
+            button.addEventListener("click", () => {
+                for (const field of ["firstName", "middleName", "lastName", "generation"]) {
+                    const input = inputs.get(field);
+                    input.value = choice.values[field] || "";
+                    updateFieldAppearance(input);
+                    clearFieldError(field);
+                }
+                syncButtons(choice.key);
+                setFormState("Name interpretation updated", "Confirm the first, middle and last name fields.");
+            });
+            buttons.appendChild(button);
+        }
+        syncButtons(suggestions.initial);
+    }
+
     function loadReview(data) {
         for (const [field, input] of inputs) {
             input.value = data[field] || "";
             updateFieldAppearance(input);
             clearFieldError(field);
         }
+        renderNameInterpretations(data.nameSuggestions);
         reviewReady = true;
         reviewContent.hidden = false;
         emptyState.hidden = true;
@@ -790,6 +901,7 @@ Email: jane@example.com"></textarea>
             updateFieldAppearance(input);
             clearFieldError(name);
         }
+        renderNameInterpretations(null);
         reviewReady = false;
         reviewContent.hidden = true;
         emptyState.hidden = false;
