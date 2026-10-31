@@ -1,3158 +1,907 @@
 // ==UserScript==
 // @name         Experian Client Data Parser & Autofill
 // @namespace    CRC Tools
-// @version      2.0
-// @description  Paste messy client data, automatically parse it, review/edit it, then populate the Experian form.
+// @version      3.0
+// @description  Paste, parse, review, and fill Experian forms with validation and accessible notifications.
 // @match        https://*.experian.com/*
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
 
-
-/* =========================================================
-   CSS
-   ========================================================= */
-
-const EXPERIAN_CSS = `
-* {
-    box-sizing: border-box;
-}
-
-:root {
-    --crc-blue: #2563eb;
-    --crc-blue-hover: #1d4ed8;
-    --crc-dark: #1f2937;
-    --crc-text: #374151;
-    --crc-muted: #6b7280;
-    --crc-border: #d1d5db;
-    --crc-bg: #f9fafb;
-    --crc-white: #ffffff;
-    --crc-warning: #92400e;
-    --crc-warning-bg: #fffbeb;
-    --crc-success: #166534;
-    --crc-success-bg: #f0fdf4;
-}
-
-
-/* =========================================================
-   LAUNCH BUTTON
-   ========================================================= */
-
-#crc-experian-launch {
-    position: fixed;
-    right: 20px;
-    bottom: 20px;
-    z-index: 999999;
-
-    height: 42px;
-    padding: 0 16px;
-
-    border: none;
-    border-radius: 7px;
-
-    background: var(--crc-dark);
-    color: #fff;
-
-    font-family: Arial, sans-serif;
-    font-size: 12px;
-    font-weight: 600;
-
-    cursor: pointer;
-
-    box-shadow: 0 3px 12px rgba(0, 0, 0, .20);
-
-    transition: .15s ease;
-}
-
-#crc-experian-launch:hover {
-    background: #111827;
-    transform: translateY(-1px);
-}
-
-
-/* =========================================================
-   OVERLAY
-   ========================================================= */
-
-#crc-experian-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 999998;
-
-    display: none;
-
-    align-items: center;
-    justify-content: center;
-
-    padding: 20px;
-
-    background: rgba(0, 0, 0, .45);
-
-    font-family: Arial, sans-serif;
-}
-
-
-/* =========================================================
-   PANEL
-   ========================================================= */
-
-#crc-experian-panel {
-    width: 700px;
-    max-width: 100%;
-    max-height: calc(100vh - 40px);
-
-    display: flex;
-    flex-direction: column;
-
-    overflow: hidden;
-
-    background: var(--crc-white);
-
-    border-radius: 9px;
-
-    box-shadow:
-        0 15px 45px rgba(0, 0, 0, .25);
-}
-
-
-/* =========================================================
-   HEADER
-   ========================================================= */
-
-#crc-experian-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-
-    padding: 14px 17px;
-
-    background: var(--crc-dark);
-    color: #fff;
-}
-
-#crc-experian-title {
-    font-size: 15px;
-    font-weight: 700;
-}
-
-#crc-experian-subtitle {
-    margin-top: 3px;
-
-    color: #cbd5e1;
-
-    font-size: 10px;
-}
-
-#crc-experian-close {
-    width: 28px;
-    height: 28px;
-
-    padding: 0;
-
-    border: none;
-    border-radius: 5px;
-
-    background: rgba(255, 255, 255, .08);
-    color: #fff;
-
-    font-size: 21px;
-    line-height: 1;
-
-    cursor: pointer;
-}
-
-#crc-experian-close:hover {
-    background: rgba(255, 255, 255, .18);
-}
-
-
-/* =========================================================
-   CONTENT
-   ========================================================= */
-
-#crc-experian-content {
-    padding: 18px;
-
-    overflow-y: auto;
-
-    background: #fff;
-}
-
-
-/* =========================================================
-   SECTION
-   ========================================================= */
-
-.crc-section {
-    margin-bottom: 18px;
-}
-
-.crc-section-title {
-    margin-bottom: 7px;
-
-    color: var(--crc-text);
-
-    font-size: 11px;
-    font-weight: 700;
-
-    text-transform: uppercase;
-    letter-spacing: .4px;
-}
-
-
-/* =========================================================
-   RAW DATA
-   ========================================================= */
-
-#crc-experian-raw {
-    display: block;
-
-    width: 100%;
-    height: 145px;
-
-    padding: 10px;
-
-    resize: vertical;
-
-    border: 1px solid var(--crc-border);
-    border-radius: 6px;
-
-    outline: none;
-
-    background: var(--crc-bg);
-    color: var(--crc-text);
-
-    font-family: Consolas, monospace;
-    font-size: 12px;
-
-    line-height: 1.5;
-}
-
-#crc-experian-raw:focus {
-    border-color: var(--crc-blue);
-
-    background: #fff;
-
-    box-shadow:
-        0 0 0 2px rgba(37, 99, 235, .10);
-}
-
-
-/* =========================================================
-   PARSE BUTTON
-   ========================================================= */
-
-#crc-experian-parse {
-    margin-top: 8px;
-
-    height: 34px;
-
-    padding: 0 14px;
-
-    border: none;
-    border-radius: 6px;
-
-    background: var(--crc-blue);
-    color: #fff;
-
-    font-size: 11px;
-    font-weight: 700;
-
-    cursor: pointer;
-}
-
-#crc-experian-parse:hover {
-    background: var(--crc-blue-hover);
-}
-
-
-/* =========================================================
-   REVIEW PANEL
-   ========================================================= */
-
-#crc-experian-review {
-    display: none;
-
-    padding: 13px;
-
-    border: 1px solid #e5e7eb;
-    border-radius: 7px;
-
-    background: var(--crc-bg);
-}
-
-
-/* =========================================================
-   FIELD ROW
-   ========================================================= */
-
-.crc-field-row {
-    display: grid;
-
-    grid-template-columns: 125px 1fr;
-
-    align-items: center;
-
-    gap: 10px;
-
-    margin-bottom: 7px;
-}
-
-.crc-field-row:last-child {
-    margin-bottom: 0;
-}
-
-
-/* =========================================================
-   FIELD LABEL
-   ========================================================= */
-
-.crc-field-label {
-    color: var(--crc-muted);
-
-    font-size: 11px;
-    font-weight: 600;
-}
-
-
-/* =========================================================
-   INPUTS
-   ========================================================= */
-
-.crc-field-input {
-    width: 100%;
-    height: 32px;
-
-    padding: 0 8px;
-
-    border: 1px solid var(--crc-border);
-    border-radius: 5px;
-
-    outline: none;
-
-    background: #fff;
-    color: var(--crc-text);
-
-    font-family: Arial, sans-serif;
-    font-size: 12px;
-}
-
-.crc-field-input:hover {
-    border-color: #9ca3af;
-}
-
-.crc-field-input:focus {
-    border-color: var(--crc-blue);
-
-    box-shadow:
-        0 0 0 2px rgba(37, 99, 235, .10);
-}
-
-
-/* =========================================================
-   WARNING
-   ========================================================= */
-
-#crc-experian-warning {
-    display: none;
-
-    margin-top: 10px;
-
-    padding: 8px 10px;
-
-    border-radius: 5px;
-
-    background: var(--crc-warning-bg);
-    color: var(--crc-warning);
-
-    font-size: 10px;
-    line-height: 1.4;
-}
-
-
-/* =========================================================
-   STATUS
-   ========================================================= */
-
-#crc-experian-status {
-    display: none;
-
-    margin-top: 10px;
-
-    padding: 8px 10px;
-
-    border-radius: 5px;
-
-    background: var(--crc-success-bg);
-    color: var(--crc-success);
-
-    font-size: 10px;
-    line-height: 1.4;
-}
-
-
-/* =========================================================
-   FOOTER
-   ========================================================= */
-
-#crc-experian-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-
-    gap: 8px;
-
-    padding: 11px 15px;
-
-    border-top: 1px solid #e5e7eb;
-
-    background: #f9fafb;
-}
-
-
-/* =========================================================
-   FOOTER BUTTONS
-   ========================================================= */
-
-.crc-footer-btn {
-    height: 34px;
-
-    padding: 0 13px;
-
-    border-radius: 5px;
-
-    font-size: 11px;
-    font-weight: 700;
-
-    cursor: pointer;
-}
-
-
-/* =========================================================
-   CLEAR
-   ========================================================= */
-
-#crc-experian-clear {
-    border: 1px solid var(--crc-border);
-
-    background: #fff;
-    color: var(--crc-text);
-}
-
-#crc-experian-clear:hover {
-    background: #f3f4f6;
-}
-
-
-/* =========================================================
-   FILL
-   ========================================================= */
-
-#crc-experian-fill {
-    border: 1px solid var(--crc-blue);
-
-    background: var(--crc-blue);
-    color: #fff;
-}
-
-#crc-experian-fill:hover {
-    background: var(--crc-blue-hover);
-}
-
-
-/* =========================================================
-   RESPONSIVE
-   ========================================================= */
-
-@media (max-width: 600px) {
-
-    #crc-experian-overlay {
-        padding: 10px;
-    }
-
-    #crc-experian-panel {
-        max-height: calc(100vh - 20px);
-    }
-
-    #crc-experian-content {
-        padding: 13px;
-    }
-
-    .crc-field-row {
-        grid-template-columns: 1fr;
-        gap: 4px;
-    }
-
-    .crc-field-input {
-        height: 34px;
-    }
-
-    #crc-experian-footer {
-        padding: 10px;
-    }
-
-    .crc-footer-btn {
-        flex: 1;
-    }
-}
-
-
-/* =========================================================
-   REDUCED MOTION
-   ========================================================= */
-
-@media (prefers-reduced-motion: reduce) {
-
-    #crc-experian-launch {
-        transition: none;
-    }
-}
-
-`;
-
-
-/* =========================================================
-   HTML
-   ========================================================= */
-
-const EXPERIAN_HTML = `
-
-<!-- =====================================================
-     FLOATING BUTTON
-     ===================================================== -->
-
-<button id="crc-experian-launch">
-    OPEN ME!
-</button>
-
-
-<!-- =====================================================
-     OVERLAY
-     ===================================================== -->
-
-<div id="crc-experian-overlay">
-
-
-    <!-- =================================================
-         PANEL
-         ================================================= -->
-
-    <div id="crc-experian-panel">
-
-
-        <!-- =============================================
-             HEADER
-             ============================================= -->
-
-        <div id="crc-experian-header">
-
-            <div>
-
-                <div id="crc-experian-title">
-                    PASTE MO NA LANG DINE!
-                </div>
-
-                <div id="crc-experian-subtitle">
-                    Paste → Parse → Review → Fill :)
-                </div>
-
-            </div>
-
-            <button id="crc-experian-close">
-                ×
-            </button>
-
-        </div>
-
-
-        <!-- =============================================
-             CONTENT
-             ============================================= -->
-
-        <div id="crc-experian-content">
-
-
-            <!-- =========================================
-                 RAW DATA
-                 ========================================= -->
-
-            <div class="crc-section">
-
-                <div class="crc-section-title">
-                    1. Paste Raw Client Data
-                </div>
-
-
-                <textarea
-                    id="crc-experian-raw"
-                    placeholder="Example:
-Leborah Joy Angeles
-123 Kalachuchi Road
-Tabing Ilog STC 64120
-DOB: 05/01/1914
-SSN: 123-12-2222
-Email: [AymaBadGurl@gmail.com](mailto:AymaBadGurl@gmail.com)"
-                ></textarea>
-
-
-                <button id="crc-experian-parse">
-                    PARSE DATA
-                </button>
-
-            </div>
-
-
-            <!-- =========================================
-                 REVIEW
-                 ========================================= -->
-
-            <div class="crc-section">
-
-                <div class="crc-section-title">
-                    2. Review & Edit
-                </div>
-
-
-                <div id="crc-experian-review">
-
-
-                    <!-- First Name -->
-
-                    <div class="crc-field-row">
-
-                        <label
-                            class="crc-field-label"
-                            for="crc-firstName">
-                            First Name
-                        </label>
-
-                        <input
-                            class="crc-field-input"
-                            id="crc-firstName"
-                            type="text"
-                        >
-
-                    </div>
-
-
-                    <!-- Middle Initial -->
-
-                    <div class="crc-field-row">
-
-                        <label
-                            class="crc-field-label"
-                            for="crc-middleName">
-                            Middle Initial
-                        </label>
-
-                        <input
-                            class="crc-field-input"
-                            id="crc-middleName"
-                            type="text"
-                        >
-
-                    </div>
-
-
-                    <!-- Last Name -->
-
-                    <div class="crc-field-row">
-
-                        <label
-                            class="crc-field-label"
-                            for="crc-lastName">
-                            Last Name
-                        </label>
-
-                        <input
-                            class="crc-field-input"
-                            id="crc-lastName"
-                            type="text"
-                        >
-
-                    </div>
-
-
-                    <!-- Generation -->
-
-                    <div class="crc-field-row">
-
-                        <label
-                            class="crc-field-label"
-                            for="crc-generation">
-                            Generation
-                        </label>
-
-                        <input
-                            class="crc-field-input"
-                            id="crc-generation"
-                            type="text"
-                        >
-
-                    </div>
-
-
-                    <!-- Address -->
-
-                    <div class="crc-field-row">
-
-                        <label
-                            class="crc-field-label"
-                            for="crc-address">
-                            Address
-                        </label>
-
-                        <input
-                            class="crc-field-input"
-                            id="crc-address"
-                            type="text"
-                        >
-
-                    </div>
-
-
-                    <!-- City -->
-
-                    <div class="crc-field-row">
-
-                        <label
-                            class="crc-field-label"
-                            for="crc-city">
-                            City
-                        </label>
-
-                        <input
-                            class="crc-field-input"
-                            id="crc-city"
-                            type="text"
-                        >
-
-                    </div>
-
-
-                    <!-- State -->
-
-                    <div class="crc-field-row">
-
-                        <label
-                            class="crc-field-label"
-                            for="crc-state">
-                            State
-                        </label>
-
-                        <input
-                            class="crc-field-input"
-                            id="crc-state"
-                            type="text"
-                            maxlength="2"
-                        >
-
-                    </div>
-
-
-                    <!-- ZIP -->
-
-                    <div class="crc-field-row">
-
-                        <label
-                            class="crc-field-label"
-                            for="crc-zip">
-                            ZIP Code
-                        </label>
-
-                        <input
-                            class="crc-field-input"
-                            id="crc-zip"
-                            type="text"
-                            maxlength="5"
-                        >
-
-                    </div>
-
-
-                    <!-- DOB -->
-
-                    <div class="crc-field-row">
-
-                        <label
-                            class="crc-field-label"
-                            for="crc-dob">
-                            Date of Birth
-                        </label>
-
-                        <input
-                            class="crc-field-input"
-                            id="crc-dob"
-                            type="text"
-                        >
-
-                    </div>
-
-
-                    <!-- SSN -->
-
-                    <div class="crc-field-row">
-
-                        <label
-                            class="crc-field-label"
-                            for="crc-ssn">
-                            SSN / ITIN
-                        </label>
-
-                        <input
-                            class="crc-field-input"
-                            id="crc-ssn"
-                            type="text"
-                        >
-
-                    </div>
-
-
-                    <!-- Email -->
-
-                    <div class="crc-field-row">
-
-                        <label
-                            class="crc-field-label"
-                            for="crc-email">
-                            Email
-                        </label>
-
-                        <input
-                            class="crc-field-input"
-                            id="crc-email"
-                            type="text"
-                        >
-
-                    </div>
-
-
-                    <!-- Report Number -->
-
-                    <div class="crc-field-row">
-
-                        <label
-                            class="crc-field-label"
-                            for="crc-reportNumber">
-                            Report Number
-                        </label>
-
-                        <input
-                            class="crc-field-input"
-                            id="crc-reportNumber"
-                            type="text"
-                        >
-
-                    </div>
-
-
-                    <!-- WARNING -->
-
-                    <div id="crc-experian-warning">
-
-                        Review the information above carefully
-                        before filling the Experian form.
-
-                    </div>
-
-
-                    <!-- STATUS -->
-
-                    <div id="crc-experian-status"></div>
-
-
-                </div>
-
-            </div>
-
-
-        </div>
-
-
-        <!-- =============================================
-             FOOTER
-             ============================================= -->
-
-        <div id="crc-experian-footer">
-
-            <button
-                id="crc-experian-clear"
-                class="crc-footer-btn">
-
-                CLEAR
-
-            </button>
-
-
-            <button
-                id="crc-experian-fill"
-                class="crc-footer-btn">
-
-                FILL EXPERIAN FORM
-
-            </button>
-
-        </div>
-
-
-    </div>
-
-</div>
-
-`;
-
-
-/* =========================================================
-   JAVASCRIPT
-   ========================================================= */
-
 (function () {
-
     "use strict";
 
+    // Keep the tool isolated from Experian's styles and never persist client data.
+    if (document.getElementById("crc-experian-root")) return;
 
-    /* =====================================================
-       CONFIGURATION
-       ===================================================== */
+    const FIELD_IDS = Object.freeze({
+        firstName: "firstName",
+        middleName: "middleName",
+        lastName: "lastName",
+        generation: "genCode",
+        address: "address",
+        city: "city",
+        state: "state",
+        zip: "zip",
+        ssn1: "ssn1",
+        ssn2: "ssn2",
+        ssn3: "ssn3",
+        email: "emailAddress",
+        emailConfirm: "emailAddressConfirm",
+        reportNumber: "alertReportId",
+        terms: "frmAcceptTC1"
+    });
 
-    const FIELD_IDS = {
+    const LABELS = Object.freeze({
+        firstName: "First name",
+        middleName: "Middle initial / name",
+        lastName: "Last name",
+        generation: "Suffix / generation",
+        address: "Street address",
+        city: "City",
+        state: "State",
+        zip: "ZIP code",
+        dob: "Date of birth",
+        ssn: "SSN / ITIN",
+        email: "Email address",
+        reportNumber: "Report number"
+    });
 
-        firstName:
-            "firstName",
-
-        middleName:
-            "middleName",
-
-        lastName:
-            "lastName",
-
-        generation:
-            "genCode",
-
-        address:
-            "address",
-
-        city:
-            "city",
-
-        state:
-            "state",
-
-        zip:
-            "zip",
-
-        ssn1:
-            "ssn1",
-
-        ssn2:
-            "ssn2",
-
-        ssn3:
-            "ssn3",
-
-        email:
-            "emailAddress",
-
-        emailConfirm:
-            "emailAddressConfirm",
-
-        reportNumber:
-            "alertReportId",
-
-        terms:
-            "frmAcceptTC1"
-
-    };
-
-
-    /* =====================================================
-       PARSER ALIASES
-       ===================================================== */
-
+    const FIELD_GROUPS = [
+        { title: "Personal details", fields: ["firstName", "middleName", "lastName", "generation"] },
+        { title: "Current address", fields: ["address", "city", "state", "zip"] },
+        { title: "Additional information", fields: ["dob", "ssn", "email", "reportNumber"] }
+    ];
+    const REQUIRED_FIELDS = new Set(["firstName", "lastName"]);
     const ALIASES = {
-
-        firstName: [
-            "firstname",
-            "first",
-            "fname",
-            "givenname",
-            "given"
-        ],
-
-        middleName: [
-            "middle",
-            "middleinitial",
-            "middlename",
-            "mi"
-        ],
-
-        lastName: [
-            "lastname",
-            "last",
-            "lname",
-            "surname",
-            "familyname"
-        ],
-
-        generation: [
-            "generation",
-            "suffix",
-            "gensuffix"
-        ],
-
-        address: [
-            "address",
-            "street",
-            "streetaddress",
-            "mailingaddress"
-        ],
-
-        city: [
-            "city"
-        ],
-
-        state: [
-            "state",
-            "st"
-        ],
-
-        zip: [
-            "zip",
-            "zipcode",
-            "postalcode",
-            "postal"
-        ],
-
-        dob: [
-            "dob",
-            "dateofbirth",
-            "birthdate",
-            "birthday"
-        ],
-
-        ssn: [
-            "ssn",
-            "socialsecurity",
-            "socialsecuritynumber",
-            "itin",
-            "taxid"
-        ],
-
-        email: [
-            "email",
-            "emailaddress",
-            "aliasemail",
-            "emailaddr"
-        ],
-
-        reportNumber: [
-            "reportnumber",
-            "reportno",
-            "reportid",
-            "report"
-        ]
-
+        firstName: ["firstname", "first", "fname", "givenname", "given"],
+        middleName: ["middle", "middleinitial", "middlename", "mi"],
+        lastName: ["lastname", "last", "lname", "surname", "familyname"],
+        generation: ["generation", "suffix", "gensuffix"],
+        address: ["address", "street", "streetaddress", "mailingaddress", "addressline1"],
+        city: ["city"],
+        state: ["state", "st"],
+        zip: ["zip", "zipcode", "postalcode", "postal"],
+        dob: ["dob", "dateofbirth", "birthdate", "birthday"],
+        ssn: ["ssn", "socialsecurity", "socialsecuritynumber", "itin", "taxid"],
+        email: ["email", "emailaddress", "aliasemail", "emailaddr"],
+        reportNumber: ["reportnumber", "reportno", "reportid", "report"],
+        fullName: ["name", "fullname", "clientname"]
     };
+    const VALID_STATES = new Set(("AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC PR GU VI AS MP").split(" "));
+    const SUFFIXES = new Set(["JR", "SR", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"]);
+    let lastFocused = null;
+    let wasPageOverflow = "";
+    let reviewReady = false;
+    let currentToastTimer = null;
 
+    const CSS = `
+:host {
+    --blue: #3559e8;
+    --blue-dark: #2343ca;
+    --ink: #172438;
+    --body: #42536b;
+    --muted: #708098;
+    --line: #e2e8f1;
+    --soft: #f5f7fb;
+    --success: #0e7657;
+    --warning: #975c09;
+    --danger: #bc354c;
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Arial, sans-serif;
+    color: var(--ink);
+    color-scheme: light;
+}
+*, *::before, *::after { box-sizing: border-box; }
+button, input, textarea { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+[hidden] { display: none !important; }
+button:focus-visible, input:focus-visible, textarea:focus-visible {
+    outline: 3px solid rgba(53, 89, 232, .25);
+    outline-offset: 2px;
+}
+#launcher {
+    position: fixed; bottom: 23px; right: 23px; z-index: 2147483645;
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 15px 10px 10px;
+    border: 1px solid rgba(255,255,255,.25); border-radius: 999px;
+    background: #172438; color: #fff; box-shadow: 0 10px 28px rgba(17, 29, 52, .22);
+    font-size: 13px; font-weight: 700; letter-spacing: .01em;
+    transition: transform .16s ease, box-shadow .16s ease;
+}
+#launcher:hover { transform: translateY(-2px); box-shadow: 0 14px 32px rgba(17,29,52,.26); }
+.launch-mark { display: grid; place-items: center; width: 29px; height: 29px; border-radius: 50%; background: #5272ff; font-size: 12px; }
+#overlay {
+    position: fixed; inset: 0; z-index: 2147483646;
+    display: grid; place-items: center; padding: 24px;
+    background: rgba(16, 27, 49, .64);
+    backdrop-filter: blur(5px);
+}
+#dialog {
+    display: flex; flex-direction: column;
+    width: min(1040px, 100%); max-height: min(790px, calc(100dvh - 48px));
+    overflow: hidden; border: 1px solid rgba(255,255,255,.75);
+    border-radius: 20px; background: #fff; box-shadow: 0 32px 85px rgba(2, 12, 32, .33);
+}
+#header { display: flex; align-items: flex-start; gap: 16px; padding: 22px 26px 17px; }
+.title-wrap { flex: 1; min-width: 0; }
+.eyebrow { display: block; margin-bottom: 4px; color: var(--blue); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+#title { margin: 0; font-size: 23px; font-weight: 790; line-height: 1.25; letter-spacing: -.035em; }
+.subtitle { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
+.icon-button { display: grid; place-items: center; width: 34px; height: 34px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--body); font-size: 21px; line-height: 1; }
+.icon-button:hover { background: var(--soft); }
+.steps { display: flex; align-items: center; gap: 9px; padding: 0 26px 18px; border-bottom: 1px solid var(--line); }
+.step { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.step-number { display: grid; place-items: center; width: 23px; height: 23px; flex: 0 0 auto; border-radius: 50%; background: #edf1f7; color: #6a7990; font-size: 11px; }
+.step.active { color: var(--blue); }
+.step.active .step-number { color: #fff; background: var(--blue); }
+.step.done .step-number { color: #0e7657; background: #d7f6eb; }
+.step-divider { height: 1px; width: 18px; background: var(--line); }
+#workspace { display: grid; grid-template-columns: minmax(270px,.85fr) minmax(350px,1.15fr); min-height: 0; overflow: auto; }
+.paste-pane { padding: 24px; border-right: 1px solid var(--line); background: linear-gradient(180deg, #fafbff 0%, #fff 50%); }
+.review-pane { padding: 24px; min-width: 0; }
+.pane-title { margin: 0 0 4px; font-size: 15px; font-weight: 760; }
+.pane-desc { margin: 0 0 16px; color: var(--muted); font-size: 12px; }
+#raw { display: block; width: 100%; min-height: 255px; padding: 13px; resize: vertical; border: 1px solid #cfd8e7; border-radius: 11px; background: #fff; color: var(--ink); font: 12px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace; }
+#raw::placeholder { color: #95a1b4; }
+.under-input { display: flex; justify-content: space-between; gap: 8px; margin-top: 9px; color: var(--muted); font-size: 10px; }
+.privacy-note { display: flex; gap: 10px; margin-top: 16px; padding: 13px; border: 1px solid #e4e9f4; border-radius: 11px; background: #f6f8fd; color: #5f6f87; font-size: 11px; }
+.privacy-note strong { color: #35455f; }
+.note-symbol { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #e5ebfc; color: var(--blue); font-size: 12px; font-weight: 800; }
+.action { min-height: 39px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-size: 12px; font-weight: 760; transition: background .15s ease, transform .15s ease; }
+.action:hover { background: #f5f7fc; }
+.action.primary { background: var(--blue); border-color: var(--blue); color: #fff; box-shadow: 0 4px 12px rgba(53, 89, 232, .15); }
+.action.primary:hover { background: var(--blue-dark); }
+.action.secondary { border-color: #ccd6ec; color: var(--blue); }
+.action.ghost { background: transparent; color: var(--muted); border-color: transparent; }
+.action.ghost:hover { background: #edf1f7; color: var(--ink); }
+#parse { width: 100%; margin-top: 16px; }
+#empty-state { display: grid; justify-items: center; text-align: center; padding: 55px 16px; border: 1px dashed #ccd6e7; border-radius: 14px; background: #fafbff; }
+.empty-art { display: grid; place-items: center; width: 55px; height: 55px; border: 1px solid #dfE6ff; border-radius: 17px; background: #edf1ff; color: var(--blue); font-size: 23px; margin-bottom: 14px; }
+#empty-state h3 { margin: 0 0 5px; font-size: 14px; }
+#empty-state p { margin: 0; max-width: 260px; color: var(--muted); font-size: 12px; }
+#review-message { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; margin-bottom: 16px; border: 1px solid #d9e9ff; background: #f0f6ff; border-radius: 10px; color: #365d91; font-size: 11px; }
+#review-message.warning { color: #87530b; border-color: #f4dfb4; background: #fffaed; }
+#review-message.error { color: #a3243e; border-color: #f3c8d1; background: #fff3f5; }
+.message-icon { font-weight: 850; font-size: 14px; }
+.field-group { margin-bottom: 17px; }
+.field-group:last-child { margin-bottom: 0; }
+.group-title { margin: 0 0 10px; color: #586b86; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.field-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 11px; }
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.field.wide { grid-column: span 2; }
+.field label { color: #485a74; font-size: 11px; font-weight: 700; }
+.required { color: var(--danger); }
+.field-control { position: relative; }
+.field input { width: 100%; min-height: 37px; padding: 8px 11px; border: 1px solid #d3dbe9; border-radius: 9px; background: #fff; color: var(--ink); font-size: 12px; outline: none; transition: border-color .15s ease, box-shadow .15s ease; }
+.field input:hover { border-color: #a4b3cd; }
+.field input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(53,89,232,.10); }
+.field input[aria-invalid="true"] { border-color: var(--danger); background: #fff9fa; }
+.field .field-error { color: var(--danger); font-size: 10px; line-height: 1.3; }
+.field .hint { color: var(--muted); font-size: 10px; }
+.field .with-toggle { padding-right: 62px; }
+#toggle-ssn { position: absolute; right: 5px; top: 5px; height: 27px; padding: 0 9px; border: 0; background: #eef1f8; color: #485a74; border-radius: 6px; font-size: 10px; font-weight: 700; }
+#footer { display: flex; align-items: center; gap: 10px; padding: 15px 24px; border-top: 1px solid var(--line); background: #fff; }
+#form-state { flex: 1; min-width: 0; color: var(--muted); font-size: 11px; }
+#form-state strong { display: block; color: var(--body); font-size: 12px; }
+.footer-actions { display: flex; gap: 8px; align-items: center; }
+#notifications { position: fixed; top: 20px; right: 20px; z-index: 2147483647; width: min(360px,calc(100vw - 40px)); pointer-events: none; }
+.toast { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px; padding: 14px 15px; border-radius: 12px; border: 1px solid #dce5f5; background: #fff; box-shadow: 0 12px 32px rgba(15,28,49,.17); pointer-events: auto; }
+.toast.success { border-left: 4px solid #15936e; }
+.toast.warning { border-left: 4px solid #dfa22c; }
+.toast.error { border-left: 4px solid #d34c64; }
+.toast.info { border-left: 4px solid var(--blue); }
+.toast-copy { flex: 1; min-width: 0; color: var(--body); font-size: 11px; }
+.toast-title { display: block; margin-bottom: 3px; color: var(--ink); font-size: 12px; font-weight: 800; }
+.toast-close { border: 0; background: none; color: var(--muted); font-size: 17px; line-height: 1; }
+@media (max-width: 760px) {
+    #overlay { padding: 10px; }
+    #dialog { max-height: calc(100dvh - 20px); border-radius: 15px; }
+    #header { padding: 17px 17px 12px; }
+    #title { font-size: 20px; }
+    .steps { padding: 0 17px 14px; }
+    #workspace { grid-template-columns: 1fr; }
+    .paste-pane { border-right: 0; border-bottom: 1px solid var(--line); padding: 17px; }
+    .review-pane { padding: 17px; }
+    #raw { min-height: 145px; }
+    #empty-state { padding: 20px; }
+    #footer { flex-wrap: wrap; padding: 12px 16px; }
+    #form-state { flex-basis: 100%; }
+    .footer-actions { width: 100%; }
+    .footer-actions .action { flex: 1; }
+}
+@media (max-width: 420px) {
+    #launcher { right: 12px; bottom: 12px; }
+    .steps { gap: 5px; }
+    .step { font-size: 10px; gap: 4px; }
+    .step-divider { width: 8px; }
+    .step-number { width: 19px; height: 19px; }
+    .field-grid { grid-template-columns: 1fr; }
+    .field.wide { grid-column: span 1; }
+    .subtitle { font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+`;
 
-    /* =====================================================
-       INJECT CSS
-       ===================================================== */
+    const HTML = `
+<button id="launcher" type="button" aria-haspopup="dialog" aria-controls="dialog" aria-label="Open Experian client autofill">
+    <span class="launch-mark" aria-hidden="true">EX</span><span>Client Autofill</span>
+</button>
+<div id="overlay" hidden>
+    <section id="dialog" role="dialog" aria-modal="true" aria-labelledby="title" tabindex="-1">
+        <header id="header">
+            <div class="title-wrap">
+                <span class="eyebrow">CRC Tools · Experian</span>
+                <h2 id="title">Client Data Autofill</h2>
+                <p class="subtitle">Paste client details, verify every field, then fill the Experian form.</p>
+            </div>
+            <button class="icon-button" id="close" type="button" aria-label="Close panel">×</button>
+        </header>
+        <nav class="steps" aria-label="Workflow">
+            <span class="step active" data-step="1"><span class="step-number">1</span>Paste</span>
+            <span class="step-divider" aria-hidden="true"></span>
+            <span class="step" data-step="2"><span class="step-number">2</span>Review</span>
+            <span class="step-divider" aria-hidden="true"></span>
+            <span class="step" data-step="3"><span class="step-number">3</span>Fill</span>
+        </nav>
+        <main id="workspace">
+            <section class="paste-pane" aria-labelledby="paste-heading">
+                <h3 class="pane-title" id="paste-heading">Paste client information</h3>
+                <p class="pane-desc">Flexible format: names, addresses, labeled fields, and contact details.</p>
+                <label for="raw" style="position:absolute;left:-10000px">Raw client information</label>
+                <textarea id="raw" spellcheck="false" autocomplete="off" placeholder="Example:
+Jane A Doe
+123 Sample Street Apt 4
+Seattle WA 98101
+DOB: 01/02/1990
+SSN: 000-00-0000
+Email: jane@example.com"></textarea>
+                <div class="under-input"><span>Ctrl + Enter to parse</span><span id="char-count">0 characters</span></div>
+                <button class="action primary" id="parse" type="button">Parse client data</button>
+                <div class="privacy-note"><span class="note-symbol" aria-hidden="true">i</span><span><strong>Privacy:</strong> Parsed details are held only in this page session. No browser storage or extra network requests are used by this tool. Clear the panel after each client.</span></div>
+            </section>
+            <section class="review-pane" aria-labelledby="review-heading">
+                <h3 class="pane-title" id="review-heading">Review and edit</h3>
+                <p class="pane-desc">Confirm the information before anything is entered on Experian.</p>
+                <div id="empty-state">
+                    <div class="empty-art" aria-hidden="true">≡</div>
+                    <h3>No data parsed yet</h3>
+                    <p>Paste information on the left and choose “Parse client data” to get started.</p>
+                </div>
+                <div id="review-content" hidden>
+                    <div id="review-message" role="status"><span class="message-icon" aria-hidden="true">i</span><span id="review-message-text"></span></div>
+                    <div id="review-fields"></div>
+                </div>
+            </section>
+        </main>
+        <footer id="footer">
+            <div id="form-state" aria-live="polite"><strong>Ready when you are</strong><span>Form submission is always manual.</span></div>
+            <div class="footer-actions">
+                <button id="clear" class="action ghost" type="button">Clear panel</button>
+                <button id="fill" class="action primary" type="button" disabled>Fill Experian form</button>
+            </div>
+        </footer>
+    </section>
+</div>
+<div id="notifications" aria-live="polite" aria-atomic="true"></div>
+`;
 
-    const style =
-        document.createElement("style");
+    const host = document.createElement("div");
+    host.id = "crc-experian-root";
+    document.body.appendChild(host);
+    const shadow = host.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent = CSS;
+    shadow.appendChild(style);
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = HTML;
+    while (wrapper.firstChild) shadow.appendChild(wrapper.firstChild);
 
-    style.id =
-        "crc-experian-style";
+    const $ = (id) => shadow.getElementById(id);
+    const raw = $("raw");
+    const overlay = $("overlay");
+    const dialog = $("dialog");
+    const reviewContent = $("review-content");
+    const emptyState = $("empty-state");
+    const reviewMessage = $("review-message");
+    const reviewMessageText = $("review-message-text");
+    const notifications = $("notifications");
+    const inputs = new Map();
+    const errors = new Map();
 
-    style.textContent =
-        EXPERIAN_CSS;
+    function buildReviewFields() {
+        const parent = $("review-fields");
+        FIELD_GROUPS.forEach((group) => {
+            const section = document.createElement("section");
+            section.className = "field-group";
+            const heading = document.createElement("h3");
+            heading.className = "group-title";
+            heading.textContent = group.title;
+            section.appendChild(heading);
+            const grid = document.createElement("div");
+            grid.className = "field-grid";
+            group.fields.forEach((fieldName) => {
+                const container = document.createElement("div");
+                container.className = "field" + (["address", "email"].includes(fieldName) ? " wide" : "");
+                const label = document.createElement("label");
+                const id = "crc-" + fieldName;
+                label.htmlFor = id;
+                label.textContent = LABELS[fieldName] + (REQUIRED_FIELDS.has(fieldName) ? " *" : "");
+                const control = document.createElement("div");
+                control.className = "field-control";
+                const input = document.createElement("input");
+                input.id = id;
+                input.type = fieldName === "ssn" ? "password" : fieldName === "email" ? "email" : "text";
+                input.autocomplete = "off";
+                input.spellcheck = false;
+                input.setAttribute("aria-describedby", id + "-error");
+                input.placeholder = ({
+                    state: "e.g. WA", zip: "e.g. 98101", dob: "MM/DD/YYYY",
+                    generation: "e.g. Jr", ssn: "000-00-0000", email: "name@example.com"
+                })[fieldName] || "";
+                if (fieldName === "ssn") input.className = "with-toggle";
+                if (["state", "zip", "ssn", "dob", "email"].includes(fieldName)) {
+                    input.inputMode = ["zip", "ssn"].includes(fieldName) ? "numeric" : "text";
+                }
+                input.addEventListener("input", () => {
+                    clearFieldError(fieldName);
+                    if (reviewReady) setFormState("Reviewing changes", "Your edited values will be used when filling.");
+                });
+                control.appendChild(input);
+                if (fieldName === "ssn") {
+                    const toggle = document.createElement("button");
+                    toggle.type = "button";
+                    toggle.id = "toggle-ssn";
+                    toggle.textContent = "Show";
+                    toggle.setAttribute("aria-label", "Show SSN");
+                    toggle.addEventListener("click", () => {
+                        const show = input.type === "password";
+                        input.type = show ? "text" : "password";
+                        toggle.textContent = show ? "Hide" : "Show";
+                        toggle.setAttribute("aria-label", show ? "Hide SSN" : "Show SSN");
+                    });
+                    control.appendChild(toggle);
+                }
+                const error = document.createElement("span");
+                error.className = "field-error";
+                error.id = id + "-error";
+                error.hidden = true;
+                container.appendChild(label);
+                container.appendChild(control);
+                container.appendChild(error);
+                grid.appendChild(container);
+                inputs.set(fieldName, input);
+                errors.set(fieldName, error);
+            });
+            section.appendChild(grid);
+            parent.appendChild(section);
+        });
+    }
+    buildReviewFields();
 
-    document.head.appendChild(style);
-
-
-    /* =====================================================
-       INJECT HTML
-       ===================================================== */
-
-    document.body.insertAdjacentHTML(
-        "beforeend",
-        EXPERIAN_HTML
-    );
-
-
-    /* =====================================================
-       ELEMENT REFERENCES
-       ===================================================== */
-
-    const launchButton =
-        document.getElementById(
-            "crc-experian-launch"
-        );
-
-    const overlay =
-        document.getElementById(
-            "crc-experian-overlay"
-        );
-
-    const closeButton =
-        document.getElementById(
-            "crc-experian-close"
-        );
-
-    const rawInput =
-        document.getElementById(
-            "crc-experian-raw"
-        );
-
-    const parseButton =
-        document.getElementById(
-            "crc-experian-parse"
-        );
-
-    const reviewPanel =
-        document.getElementById(
-            "crc-experian-review"
-        );
-
-    const clearButton =
-        document.getElementById(
-            "crc-experian-clear"
-        );
-
-    const fillButton =
-        document.getElementById(
-            "crc-experian-fill"
-        );
-
-    const warning =
-        document.getElementById(
-            "crc-experian-warning"
-        );
-
-    const status =
-        document.getElementById(
-            "crc-experian-status"
-        );
-
-
-    /* =====================================================
-       REVIEW FIELD MAP
-       ===================================================== */
-
-    const REVIEW_FIELDS = {
-
-        firstName:
-            "crc-firstName",
-
-        middleName:
-            "crc-middleName",
-
-        lastName:
-            "crc-lastName",
-
-        generation:
-            "crc-generation",
-
-        address:
-            "crc-address",
-
-        city:
-            "crc-city",
-
-        state:
-            "crc-state",
-
-        zip:
-            "crc-zip",
-
-        dob:
-            "crc-dob",
-
-        ssn:
-            "crc-ssn",
-
-        email:
-            "crc-email",
-
-        reportNumber:
-            "crc-reportNumber"
-
-    };
-
-
-    /* =====================================================
-       OPEN PANEL
-       ===================================================== */
-
-    function openPanel() {
-
-        overlay.style.display =
-            "flex";
-
-        rawInput.focus();
-
+    function setFormState(title, detail) {
+        const state = $("form-state");
+        state.replaceChildren();
+        const strong = document.createElement("strong");
+        strong.textContent = title;
+        const span = document.createElement("span");
+        span.textContent = detail;
+        state.append(strong, span);
     }
 
-
-    /* =====================================================
-       CLOSE PANEL
-       ===================================================== */
-
-    function closePanel() {
-
-        overlay.style.display =
-            "none";
-
+    function notify(type, title, detail) {
+        if (currentToastTimer !== null) {
+            clearTimeout(currentToastTimer);
+            currentToastTimer = null;
+        }
+        notifications.replaceChildren();
+        const toast = document.createElement("div");
+        toast.className = "toast " + type;
+        toast.setAttribute("role", type === "error" ? "alert" : "status");
+        const message = document.createElement("div");
+        message.className = "toast-copy";
+        const heading = document.createElement("strong");
+        heading.className = "toast-title";
+        heading.textContent = title;
+        const description = document.createElement("span");
+        description.textContent = detail || "";
+        message.append(heading, description);
+        const close = document.createElement("button");
+        close.className = "toast-close";
+        close.type = "button";
+        close.textContent = "×";
+        close.setAttribute("aria-label", "Dismiss notification");
+        close.addEventListener("click", () => {
+            toast.remove();
+            if (currentToastTimer !== null) clearTimeout(currentToastTimer);
+            currentToastTimer = null;
+        });
+        toast.append(message, close);
+        notifications.appendChild(toast);
+        currentToastTimer = setTimeout(() => {
+            toast.remove();
+            currentToastTimer = null;
+        }, type === "error" ? 9000 : 6000);
     }
 
+    function setStep(step) {
+        shadow.querySelectorAll("[data-step]").forEach((element) => {
+            const index = Number(element.getAttribute("data-step"));
+            element.classList.toggle("active", index === step);
+            element.classList.toggle("done", index < step);
+        });
+    }
 
-    /* =====================================================
-       NORMALIZE TEXT
-       ===================================================== */
+    function showReviewMessage(message, kind) {
+        reviewMessage.className = kind || "";
+        reviewMessageText.textContent = message;
+    }
+
+    function showFieldError(name, message) {
+        const input = inputs.get(name);
+        const error = errors.get(name);
+        if (!input || !error) return;
+        input.setAttribute("aria-invalid", "true");
+        error.textContent = message;
+        error.hidden = false;
+    }
+
+    function clearFieldError(name) {
+        const input = inputs.get(name);
+        const error = errors.get(name);
+        if (!input || !error) return;
+        input.removeAttribute("aria-invalid");
+        error.textContent = "";
+        error.hidden = true;
+    }
 
     function normalizeText(value) {
-
-        return String(value || "")
-            .trim()
-            .replace(/\s+/g, " ");
-
+        return String(value || "").trim().replace(/\s+/g, " ");
     }
-
-
-    /* =====================================================
-       NORMALIZE LABEL
-       ===================================================== */
-
-    function normalizeLabel(label) {
-
-        return String(label || "")
-            .toLowerCase()
-            .replace(/[^a-z0-9]/g, "");
-
+    function normalizeLabel(value) {
+        return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
     }
-
-
-    /* =====================================================
-       FIND FIELD
-       ===================================================== */
-
     function findField(label) {
-
-        const normalized =
-            normalizeLabel(label);
-
-
-        for (
-            const fieldName in ALIASES
-        ) {
-
-            if (
-                ALIASES[fieldName]
-                    .includes(normalized)
-            ) {
-
-                return fieldName;
-
-            }
-
+        const key = normalizeLabel(label);
+        for (const [field, names] of Object.entries(ALIASES)) {
+            if (names.includes(key)) return field;
         }
-
-
         return null;
-
     }
-
-
-    /* =====================================================
-       EXTRACT EMAIL
-       ===================================================== */
-
     function extractEmail(value) {
-
-        if (!value) {
-            return "";
-        }
-
-
-        /*
-         * Handles:
-         *
-         * john@example.com
-         *
-         * [john@example.com](mailto:john@example.com)
-         */
-
-        const markdown =
-            String(value).match(
-                /\[[^\]]+\]\(\s*mailto:([^)]+)\)/i
-            );
-
-
-        if (markdown) {
-
-            return markdown[1]
-                .trim();
-
-        }
-
-
-        const email =
-            String(value).match(
-                /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i
-            );
-
-
-        return email
-            ? email[0]
-            : "";
-
+        const match = String(value || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+        return match ? match[0] : "";
     }
-
-
-    /* =====================================================
-       EXTRACT SSN
-       ===================================================== */
-
     function extractSSN(value) {
-
-        if (!value) {
-            return "";
-        }
-
-
-        const digits =
-            String(value)
-                .replace(/\D/g, "");
-
-
-        if (
-            digits.length !== 9
-        ) {
-
-            return normalizeText(value);
-
-        }
-
-
-        return (
-            digits.substring(0, 3) +
-            "-" +
-            digits.substring(3, 5) +
-            "-" +
-            digits.substring(5, 9)
-        );
-
+        const digits = String(value || "").replace(/\D/g, "");
+        if (digits.length !== 9) return normalizeText(value);
+        return digits.slice(0, 3) + "-" + digits.slice(3, 5) + "-" + digits.slice(5);
     }
-
-
-    /* =====================================================
-       EXTRACT ZIP
-       ===================================================== */
-
     function extractZIP(value) {
-
-        if (!value) {
-            return "";
-        }
-
-
-        const match =
-            String(value)
-                .match(/\b\d{5}(?:-\d{4})?\b/);
-
-
-        return match
-            ? match[0]
-            : "";
-
+        const match = String(value || "").match(/\b\d{5}(?:-\d{4})?\b/);
+        return match ? match[0] : "";
     }
-
-
-    /* =====================================================
-       EXTRACT STATE + ZIP
-       ===================================================== */
-
     function parseLocation(line) {
-
-        const result = {
-
-            city: "",
-            state: "",
-            zip: ""
-
-        };
-
-
-        const clean =
-            normalizeText(line);
-
-
-        /*
-         * Example:
-         *
-         * BATON ROUGE LA 70802
-         *
-         * CITY = BATON ROUGE
-         * STATE = LA
-         * ZIP = 70802
-         */
-
-
-        const match =
-            clean.match(
-                /^(.+?)\s+([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/
-            );
-
-
-        if (match) {
-
-            result.city =
-                match[1].trim();
-
-            result.state =
-                match[2]
-                    .toUpperCase();
-
-            result.zip =
-                match[3];
-
-            return result;
-
-        }
-
-
-        /*
-         * Example:
-         *
-         * BATON ROUGE, LA 70802
-         */
-
-        const commaMatch =
-            clean.match(
-                /^(.+?),\s*([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/
-            );
-
-
-        if (commaMatch) {
-
-            result.city =
-                commaMatch[1].trim();
-
-            result.state =
-                commaMatch[2]
-                    .toUpperCase();
-
-            result.zip =
-                commaMatch[3];
-
-            return result;
-
-        }
-
-
-        return result;
-
+        const match = normalizeText(line).match(/^(.+?),?\s+([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/);
+        if (!match) return null;
+        const state = match[2].toUpperCase();
+        if (!VALID_STATES.has(state)) return null;
+        return { city: match[1].replace(/,\s*$/, "").trim(), state, zip: match[3] };
     }
-
-
-    /* =====================================================
-       PARSE NAME
-       ===================================================== */
-
     function parseName(line) {
-
-        const result = {
-
-            firstName: "",
-            middleName: "",
-            lastName: "",
-            generation: ""
-
-        };
-
-
-        const words =
-            normalizeText(line)
-                .split(" ")
-                .filter(Boolean);
-
-
-        if (words.length < 2) {
-
-            return result;
-
-        }
-
-
-        /*
-         * Check for suffix/generation.
-         */
-
-        const generations = [
-            "JR",
-            "JR.",
-            "SR",
-            "SR.",
-            "I",
-            "II",
-            "III",
-            "IV",
-            "V",
-            "VI",
-            "VII",
-            "VIII",
-            "IX"
-        ];
-
-
+        const words = normalizeText(line).split(" ").filter(Boolean);
+        if (words.length < 2) return null;
         let generation = "";
-
-
-        if (
-            generations.includes(
-                words[words.length - 1]
-                    .toUpperCase()
-            )
-        ) {
-
-            generation =
-                words.pop();
-
-        }
-
-
-        /*
-         * First word = first name.
-         * Last word = last name.
-         * Anything between = middle name/initial.
-         */
-
-        result.firstName =
-            words.shift() || "";
-
-
-        result.lastName =
-            words.pop() || "";
-
-
-        result.middleName =
-            words.join(" ");
-
-
-        result.generation =
-            generation;
-
-
-        return result;
-
-    }
-
-
-    /* =====================================================
-       PARSE RAW DATA
-       ===================================================== */
-
-    function parseRawData(raw) {
-
-        const data = {
-
-            firstName: "",
-            middleName: "",
-            lastName: "",
-            generation: "",
-
-            address: "",
-            city: "",
-            state: "",
-            zip: "",
-
-            dob: "",
-            ssn: "",
-            email: "",
-
-            reportNumber: ""
-
+        const last = words[words.length - 1].replace(/\./g, "").toUpperCase();
+        if (SUFFIXES.has(last) && words.length > 2) generation = words.pop();
+        if (words.length < 2) return null;
+        return {
+            firstName: words.shift(),
+            lastName: words.pop(),
+            middleName: words.join(" "),
+            generation
         };
-
-
-        const lines =
-            String(raw)
-                .split(/\r?\n/)
-                .map(line => line.trim())
-                .filter(Boolean);
-
-
-        if (!lines.length) {
-
-            return data;
-
+    }
+    function looksLikeName(line) {
+        if (/\d|@|[:=]/.test(line)) return false;
+        if (/\b(ST|STREET|AVE|AVENUE|RD|ROAD|BLVD|DR|DRIVE|LN|LANE|CT|COURT|HWY|HIGHWAY|PKWY|PARKWAY)\b/i.test(line)) return false;
+        const count = normalizeText(line).split(" ").length;
+        return count >= 2 && count <= 5;
+    }
+    function findAddressIndex(lines) {
+        const terms = /\b(ST|STREET|AVE|AVENUE|RD|ROAD|BLVD|DR|DRIVE|LN|LANE|CT|COURT|HWY|HIGHWAY|PKWY|PARKWAY|WAY|PL|PLACE|CIR|CIRCLE|APT|UNIT)\b/i;
+        let fallback = -1;
+        for (let i = 0; i < lines.length; i++) {
+            if (!/^\d+\s+\S/.test(lines[i])) continue;
+            if (fallback === -1) fallback = i;
+            if (terms.test(lines[i])) return i;
         }
+        return fallback;
+    }
+    function assignParsedField(data, field, value) {
+        const clean = normalizeText(value);
+        if (!clean) return;
+        if (field === "fullName") {
+            const parsed = parseName(clean);
+            if (parsed) Object.assign(data, parsed);
+        } else if (field === "email") {
+            data.email = extractEmail(clean);
+        } else if (field === "ssn") {
+            data.ssn = extractSSN(clean);
+        } else if (field === "zip") {
+            data.zip = extractZIP(clean);
+        } else if (field === "state") {
+            data.state = clean.toUpperCase();
+        } else if (Object.prototype.hasOwnProperty.call(data, field)) {
+            data[field] = clean;
+        }
+    }
 
-
-        /*
-         * -------------------------------------------------
-         * STEP 1
-         * Find explicitly labeled fields.
-         * -------------------------------------------------
-         */
-
-        const unlabeledLines = [];
-
-
-        for (
-            let i = 0;
-            i < lines.length;
-            i++
-        ) {
-
-            const line =
-                lines[i];
-
-
-            /*
-             * Ignore Markdown links as standalone noise.
-             */
-
-            if (
-                line.startsWith("[") &&
-                line.includes("](mailto:")
-            ) {
-
-                continue;
-
-            }
-
-
-            /*
-             * Look for:
-             *
-             * DOB: 11/26/1989
-             * SSN: 222-22-2222
-             * Email: john@example.com
-             */
-
-            const match =
-                line.match(
-                    /^([^:]+):\s*(.+)$/
-                );
-
-
-            if (!match) {
-
-                /*
-                 * Also support:
-                 *
-                 * Email = john@example.com
-                 */
-
-                const equalsMatch =
-                    line.match(
-                        /^([^=]+)=\s*(.+)$/
-                    );
-
-
-                if (!equalsMatch) {
-
-                    unlabeledLines.push(
-                        line
-                    );
-
+    function parseRawData(text) {
+        const data = Object.fromEntries(Object.keys(LABELS).map((key) => [key, ""]));
+        const lines = String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        const rest = [];
+        for (const line of lines) {
+            const label = line.match(/^([^:=]{1,45})\s*[:=]\s*(.*)$/);
+            if (label) {
+                const field = findField(label[1]);
+                if (field) {
+                    assignParsedField(data, field, label[2]);
                     continue;
-
                 }
-
-
-                const field =
-                    findField(
-                        equalsMatch[1]
-                    );
-
-
-                if (!field) {
-
-                    unlabeledLines.push(
-                        line
-                    );
-
-                    continue;
-
+            }
+            rest.push(line);
+        }
+        // Extract unambiguous standalone values first, before guessing names or addresses.
+        for (let i = rest.length - 1; i >= 0; i--) {
+            const line = rest[i];
+            if (!data.email && extractEmail(line)) {
+                data.email = extractEmail(line);
+                rest.splice(i, 1);
+            } else if (!data.ssn && /^\d{3}[-\s]?\d{2}[-\s]?\d{4}$/.test(line)) {
+                data.ssn = extractSSN(line);
+                rest.splice(i, 1);
+            } else if (!data.dob && /^(?:\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2})$/.test(line)) {
+                data.dob = line;
+                rest.splice(i, 1);
+            }
+        }
+        if (!data.firstName && !data.lastName) {
+            const index = rest.findIndex(looksLikeName);
+            if (index >= 0) {
+                const parsed = parseName(rest[index]);
+                if (parsed) {
+                    Object.assign(data, parsed);
+                    rest.splice(index, 1);
                 }
-
-
-                const value =
-                    equalsMatch[2]
-                        .trim();
-
-
-                assignParsedField(
-                    data,
-                    field,
-                    value
-                );
-
-
-                continue;
-
             }
-
-
-            const field =
-                findField(
-                    match[1]
-                );
-
-
-            if (!field) {
-
-                unlabeledLines.push(
-                    line
-                );
-
-                continue;
-
-            }
-
-
-            const value =
-                match[2].trim();
-
-
-            assignParsedField(
-                data,
-                field,
-                value
-            );
-
         }
-
-
-        /*
-         * -------------------------------------------------
-         * STEP 2
-         * Process obvious unlabeled lines.
-         * -------------------------------------------------
-         */
-
-        const cleanUnlabeled =
-            unlabeledLines
-                .map(normalizeText)
-                .filter(Boolean);
-
-
-        /*
-         * Name:
-         *
-         * Terrance DUDULA
-         */
-
-        if (
-            !data.firstName &&
-            !data.lastName &&
-            cleanUnlabeled.length
-        ) {
-
-            const nameIndex =
-                findLikelyNameLine(
-                    cleanUnlabeled
-                );
-
-
-            if (
-                nameIndex !== -1
-            ) {
-
-                const name =
-                    parseName(
-                        cleanUnlabeled[
-                            nameIndex
-                        ]
-                    );
-
-
-                data.firstName =
-                    name.firstName;
-
-                data.middleName =
-                    name.middleName;
-
-                data.lastName =
-                    name.lastName;
-
-                data.generation =
-                    name.generation;
-
-
-                cleanUnlabeled.splice(
-                    nameIndex,
-                    1
-                );
-
-            }
-
-        }
-
-
-        /*
-         * -------------------------------------------------
-         * STEP 3
-         * Find address.
-         * -------------------------------------------------
-         */
-
         if (!data.address) {
-
-            const addressIndex =
-                findLikelyAddressLine(
-                    cleanUnlabeled
-                );
-
-
-            if (
-                addressIndex !== -1
-            ) {
-
-                data.address =
-                    cleanUnlabeled[
-                        addressIndex
-                    ];
-
-
-                cleanUnlabeled.splice(
-                    addressIndex,
-                    1
-                );
-
-            }
-
+            const index = findAddressIndex(rest);
+            if (index >= 0) data.address = rest.splice(index, 1)[0];
         }
-
-
-        /*
-         * -------------------------------------------------
-         * STEP 4
-         * Find CITY STATE ZIP.
-         * -------------------------------------------------
-         */
-
-        for (
-            let i = 0;
-            i < cleanUnlabeled.length;
-            i++
-        ) {
-
-            const location =
-                parseLocation(
-                    cleanUnlabeled[i]
-                );
-
-
-            if (
-                location.city &&
-                location.state &&
-                location.zip
-            ) {
-
-                if (!data.city) {
-
-                    data.city =
-                        location.city;
-
+        if (!data.city || !data.state || !data.zip) {
+            for (let i = 0; i < rest.length; i++) {
+                const location = parseLocation(rest[i]);
+                if (!location) continue;
+                for (const [key, value] of Object.entries(location)) {
+                    if (!data[key]) data[key] = value;
                 }
-
-                if (!data.state) {
-
-                    data.state =
-                        location.state;
-
-                }
-
-                if (!data.zip) {
-
-                    data.zip =
-                        location.zip;
-
-                }
-
-
-                cleanUnlabeled.splice(
-                    i,
-                    1
-                );
-
-
                 break;
-
             }
-
         }
-
-
-        /*
-         * -------------------------------------------------
-         * STEP 5
-         * Find standalone email.
-         * -------------------------------------------------
-         */
-
-        if (!data.email) {
-
-            for (
-                let i = 0;
-                i < cleanUnlabeled.length;
-                i++
-            ) {
-
-                const email =
-                    extractEmail(
-                        cleanUnlabeled[i]
-                    );
-
-
-                if (email) {
-
-                    data.email =
-                        email;
-
-
-                    cleanUnlabeled.splice(
-                        i,
-                        1
-                    );
-
-
-                    break;
-
-                }
-
-            }
-
-        }
-
-
-        /*
-         * -------------------------------------------------
-         * STEP 6
-         * Find standalone SSN.
-         * -------------------------------------------------
-         */
-
-        if (!data.ssn) {
-
-            for (
-                let i = 0;
-                i < cleanUnlabeled.length;
-                i++
-            ) {
-
-                if (
-                    /\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b/
-                        .test(
-                            cleanUnlabeled[i]
-                        )
-                ) {
-
-                    data.ssn =
-                        extractSSN(
-                            cleanUnlabeled[i]
-                        );
-
-
-                    cleanUnlabeled.splice(
-                        i,
-                        1
-                    );
-
-
-                    break;
-
-                }
-
-            }
-
-        }
-
-
         return data;
-
     }
-
-
-    /* =====================================================
-       ASSIGN PARSED FIELD
-       ===================================================== */
-
-    function assignParsedField(
-        data,
-        field,
-        value
-    ) {
-
-        value =
-            normalizeText(value);
-
-
-        switch (field) {
-
-            case "firstName":
-
-                data.firstName =
-                    value;
-
-                break;
-
-
-            case "middleName":
-
-                data.middleName =
-                    value;
-
-                break;
-
-
-            case "lastName":
-
-                data.lastName =
-                    value;
-
-                break;
-
-
-            case "generation":
-
-                data.generation =
-                    value;
-
-                break;
-
-
-            case "address":
-
-                data.address =
-                    value;
-
-                break;
-
-
-            case "city":
-
-                data.city =
-                    value;
-
-                break;
-
-
-            case "state":
-
-                data.state =
-                    value
-                        .toUpperCase();
-
-                break;
-
-
-            case "zip":
-
-                data.zip =
-                    extractZIP(value);
-
-                break;
-
-
-            case "dob":
-
-                data.dob =
-                    value;
-
-                break;
-
-
-            case "ssn":
-
-                data.ssn =
-                    extractSSN(value);
-
-                break;
-
-
-            case "email":
-
-                data.email =
-                    extractEmail(value);
-
-                break;
-
-
-            case "reportNumber":
-
-                data.reportNumber =
-                    value;
-
-                break;
-
-        }
-
-    }
-
-
-    /* =====================================================
-       FIND LIKELY NAME
-       ===================================================== */
-
-    function findLikelyNameLine(lines) {
-
-        for (
-            let i = 0;
-            i < lines.length;
-            i++
-        ) {
-
-            const line =
-                lines[i];
-
-
-            /*
-             * A name generally:
-             *
-             * Terrance DUDULA
-             *
-             * and does not contain:
-             *
-             * numbers
-             * @
-             * address indicators
-             */
-
-            if (
-                /\d/.test(line)
-            ) {
-
-                continue;
-
-            }
-
-
-            if (
-                /@/.test(line)
-            ) {
-
-                continue;
-
-            }
-
-
-            if (
-                /\b(ST|STREET|AVE|AVENUE|RD|ROAD|BLVD|DR|DRIVE|LN|LANE|CT|COURT|HWY|HIGHWAY)\b/i
-                    .test(line)
-            ) {
-
-                continue;
-
-            }
-
-
-            const words =
-                line.split(/\s+/);
-
-
-            if (
-                words.length >= 2 &&
-                words.length <= 4
-            ) {
-
-                return i;
-
-            }
-
-        }
-
-
-        return -1;
-
-    }
-
-
-    /* =====================================================
-       FIND LIKELY ADDRESS
-       ===================================================== */
-
-    function findLikelyAddressLine(lines) {
-
-        const addressWords = [
-            "ST",
-            "STREET",
-            "AVE",
-            "AVENUE",
-            "RD",
-            "ROAD",
-            "BLVD",
-            "BOULEVARD",
-            "DR",
-            "DRIVE",
-            "LN",
-            "LANE",
-            "CT",
-            "COURT",
-            "HWY",
-            "HIGHWAY",
-            "PKWY",
-            "PARKWAY",
-            "WAY",
-            "PL",
-            "PLACE",
-            "CIR",
-            "CIRCLE"
-        ];
-
-
-        for (
-            let i = 0;
-            i < lines.length;
-            i++
-        ) {
-
-            const line =
-                lines[i];
-
-
-            if (
-                !/^\d+\s+/.test(line)
-            ) {
-
-                continue;
-
-            }
-
-
-            const upper =
-                line.toUpperCase();
-
-
-            if (
-                addressWords.some(
-                    word =>
-                        new RegExp(
-                            "\\b" +
-                            word +
-                            "\\b"
-                        ).test(upper)
-                )
-            ) {
-
-                return i;
-
-            }
-
-        }
-
-
-        /*
-         * If it begins with a number,
-         * it is still probably an address.
-         */
-
-        for (
-            let i = 0;
-            i < lines.length;
-            i++
-        ) {
-
-            if (
-                /^\d+\s+/.test(
-                    lines[i]
-                )
-            ) {
-
-                return i;
-
-            }
-
-        }
-
-
-        return -1;
-
-    }
-
-
-    /* =====================================================
-       PUT DATA INTO REVIEW PANEL
-       ===================================================== */
-
-    function setReviewField(
-        field,
-        value
-    ) {
-
-        const element =
-            document.getElementById(
-                REVIEW_FIELDS[field]
-            );
-
-
-        if (element) {
-
-            element.value =
-                value || "";
-
-        }
-
-    }
-
-
-    /* =====================================================
-       LOAD REVIEW PANEL
-       ===================================================== */
-
-    function loadReview(data) {
-
-        Object.keys(
-            REVIEW_FIELDS
-        ).forEach(field => {
-
-            setReviewField(
-                field,
-                data[field] || ""
-            );
-
-        });
-
-
-        reviewPanel.style.display =
-            "block";
-
-
-        warning.style.display =
-            "block";
-
-
-        status.style.display =
-            "block";
-
-
-        status.textContent =
-            "Data parsed. Review and edit the fields before filling the Experian form.";
-
-    }
-
-
-    /* =====================================================
-       READ REVIEW PANEL
-       ===================================================== */
 
     function readReview() {
-
         const data = {};
-
-
-        Object.keys(
-            REVIEW_FIELDS
-        ).forEach(field => {
-
-            const element =
-                document.getElementById(
-                    REVIEW_FIELDS[field]
-                );
-
-
-            data[field] =
-                element
-                    ? element.value.trim()
-                    : "";
-
-        });
-
-
+        for (const [field, input] of inputs) data[field] = input.value.trim();
         return data;
-
+    }
+    function loadReview(data) {
+        for (const [field, input] of inputs) {
+            input.value = data[field] || "";
+            clearFieldError(field);
+        }
+        const ssn = inputs.get("ssn");
+        ssn.type = "password";
+        $("toggle-ssn").textContent = "Show";
+        $("toggle-ssn").setAttribute("aria-label", "Show SSN");
+        reviewReady = true;
+        reviewContent.hidden = false;
+        emptyState.hidden = true;
+        $("fill").disabled = false;
+        setStep(2);
+        const count = Object.values(data).filter(Boolean).length;
+        const required = data.firstName && data.lastName;
+        showReviewMessage(
+            count + " of 12 fields detected. " + (required ? "Review values carefully, then fill the form." : "First and last name need attention before filling."),
+            required ? "" : "warning"
+        );
+        setFormState("Review your data", "The parser may not recognize every format; verify all fields.");
+        notify(required ? "success" : "warning", "Parsing complete", count + " fields detected. Confirm the details on the right.");
     }
 
-
-    /* =====================================================
-       SET EXPERIAN INPUT
-       ===================================================== */
-
-    function setInputValue(
-        id,
-        value
-    ) {
-
-        const element =
-            document.getElementById(id);
-
-
-        if (!element) {
-
-            return false;
-
-        }
-
-
-        /*
-         * Use the native setter.
-         * This helps with older pages
-         * that listen for input events.
-         */
-
-        const descriptor =
-            Object.getOwnPropertyDescriptor(
-                HTMLInputElement.prototype,
-                "value"
-            );
-
-
-        if (
-            descriptor &&
-            descriptor.set
-        ) {
-
-            descriptor.set.call(
-                element,
-                value || ""
-            );
-
+    function validDOB(value) {
+        let y, m, d;
+        let match = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (match) {
+            m = Number(match[1]); d = Number(match[2]); y = Number(match[3]);
         } else {
-
-            element.value =
-                value || "";
-
+            match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            if (!match) return false;
+            y = Number(match[1]); m = Number(match[2]); d = Number(match[3]);
         }
-
-
-        element.dispatchEvent(
-            new Event(
-                "input",
-                {
-                    bubbles: true
-                }
-            )
-        );
-
-
-        element.dispatchEvent(
-            new Event(
-                "change",
-                {
-                    bubbles: true
-                }
-            )
-        );
-
-
-        element.dispatchEvent(
-            new Event(
-                "blur",
-                {
-                    bubbles: true
-                }
-            )
-        );
-
-
-        return true;
-
+        const date = new Date(Date.UTC(y, m - 1, d));
+        const now = new Date();
+        return y >= 1880 && y <= now.getUTCFullYear() &&
+            date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 &&
+            date.getUTCDate() === d && date.getTime() <= now.getTime();
     }
 
-
-    /* =====================================================
-       SET SELECT VALUE
-       ===================================================== */
-
-    function setSelectValue(
-        id,
-        value
-    ) {
-
-        const select =
-            document.getElementById(id);
-
-
-        if (!select) {
-
-            return false;
-
-        }
-
-
-        const wanted =
-            String(value)
-                .trim()
-                .toLowerCase();
-
-
-        for (
-            const option of select.options
-        ) {
-
-            const optionValue =
-                option.value
-                    .trim()
-                    .toLowerCase();
-
-            const optionText =
-                option.textContent
-                    .trim()
-                    .toLowerCase();
-
-
-            if (
-                optionValue === wanted ||
-                optionText === wanted
-            ) {
-
-                select.value =
-                    option.value;
-
-
-                select.dispatchEvent(
-                    new Event(
-                        "change",
-                        {
-                            bubbles: true
-                        }
-                    )
-                );
-
-
-                select.dispatchEvent(
-                    new Event(
-                        "input",
-                        {
-                            bubbles: true
-                        }
-                    )
-                );
-
-
-                return true;
-
-            }
-
-        }
-
-
-        return false;
-
+    function validate(data) {
+        const invalid = [];
+        if (!data.firstName) invalid.push(["firstName", "First name is required."]);
+        if (!data.lastName) invalid.push(["lastName", "Last name is required."]);
+        if (data.state && !VALID_STATES.has(data.state.toUpperCase())) invalid.push(["state", "Use a valid two-letter US state or territory code."]);
+        if (data.zip && !/^\d{5}(?:-\d{4})?$/.test(data.zip)) invalid.push(["zip", "Enter a 5-digit ZIP or ZIP+4."]);
+        if (data.ssn && data.ssn.replace(/\D/g, "").length !== 9) invalid.push(["ssn", "SSN / ITIN must contain exactly 9 digits."]);
+        if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) invalid.push(["email", "Enter a valid email address."]);
+        if (data.dob && !validDOB(data.dob)) invalid.push(["dob", "Use a valid past date: MM/DD/YYYY or YYYY-MM-DD."]);
+        return invalid;
     }
 
-
-    /* =====================================================
-       FILL SSN
-       ===================================================== */
-
-    function fillSSN(ssn) {
-
-        const digits =
-            String(ssn || "")
-                .replace(/\D/g, "");
-
-
-        if (
-            digits.length !== 9
-        ) {
-
-            return false;
-
-        }
-
-
-        setInputValue(
-            FIELD_IDS.ssn1,
-            digits.substring(0, 3)
-        );
-
-
-        setInputValue(
-            FIELD_IDS.ssn2,
-            digits.substring(3, 5)
-        );
-
-
-        setInputValue(
-            FIELD_IDS.ssn3,
-            digits.substring(5, 9)
-        );
-
-
-        return true;
-
+    function getTarget(id) {
+        const element = document.getElementById(id);
+        return element && !host.contains(element) ? element : null;
     }
 
+    function setInputValue(id, value) {
+        const element = getTarget(id);
+        if (!element) return "field not found on this page";
+        if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) return "unsupported field type";
+        if (element.disabled || element.readOnly) return "field is disabled or read-only";
+        try {
+            const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+            const setter = Object.getOwnPropertyDescriptor(prototype, "value").set;
+            setter.call(element, value);
+            element.dispatchEvent(new Event("input", { bubbles: true }));
+            element.dispatchEvent(new Event("change", { bubbles: true }));
+            return null;
+        } catch (_error) {
+            return "could not update field";
+        }
+    }
 
-    /* =====================================================
-       FILL EXPERIAN FORM
-       ===================================================== */
+    function setSelectValue(id, value) {
+        const element = getTarget(id);
+        if (!element) return "field not found on this page";
+        if (!(element instanceof HTMLSelectElement)) return setInputValue(id, value);
+        if (element.disabled) return "field is disabled";
+        const wanted = normalizeText(value).replace(/\.$/, "").toLowerCase();
+        let match = Array.from(element.options).find((option) =>
+            normalizeText(option.value).replace(/\.$/, "").toLowerCase() === wanted ||
+            normalizeText(option.textContent).replace(/\.$/, "").toLowerCase() === wanted
+        );
+        if (!match && wanted === "jr") {
+            match = Array.from(element.options).find((option) => /^junior$/i.test(normalizeText(option.textContent)));
+        }
+        if (!match && wanted === "sr") {
+            match = Array.from(element.options).find((option) => /^senior$/i.test(normalizeText(option.textContent)));
+        }
+        if (!match) return "matching option unavailable";
+        try {
+            const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+            setter.call(element, match.value);
+            element.dispatchEvent(new Event("input", { bubbles: true }));
+            element.dispatchEvent(new Event("change", { bubbles: true }));
+            return null;
+        } catch (_error) {
+            return "could not select option";
+        }
+    }
+
+    function fillSSN(value) {
+        const digits = value.replace(/\D/g, "");
+        if (digits.length !== 9) return "must contain exactly nine digits";
+        const parts = [FIELD_IDS.ssn1, FIELD_IDS.ssn2, FIELD_IDS.ssn3];
+        if (parts.some((id) => !getTarget(id))) return "one or more SSN fields not found";
+        if (parts.some((id) => getTarget(id).disabled || getTarget(id).readOnly)) return "one or more SSN fields are disabled";
+        for (const [index, id] of parts.entries()) {
+            const part = index === 0 ? digits.slice(0, 3) : index === 1 ? digits.slice(3, 5) : digits.slice(5);
+            const error = setInputValue(id, part);
+            if (error) return error;
+        }
+        return null;
+    }
+
+    function detectFormFields() {
+        return [
+            FIELD_IDS.firstName, FIELD_IDS.lastName, FIELD_IDS.address,
+            FIELD_IDS.city, FIELD_IDS.zip, FIELD_IDS.email
+        ].filter((id) => Boolean(getTarget(id))).length;
+    }
 
     function fillExperian(data) {
-
-        const filled = [];
-
-        const missing = [];
-
-
-        /*
-         * NAME
-         */
-
-        if (data.firstName) {
-
-            if (
-                setInputValue(
-                    FIELD_IDS.firstName,
-                    data.firstName
-                )
-            ) {
-
-                filled.push(
-                    "First Name"
-                );
-
-            }
-
+        const succeeded = [];
+        const issues = [];
+        const mapping = [
+            ["firstName", "First name", () => setInputValue(FIELD_IDS.firstName, data.firstName)],
+            ["middleName", "Middle initial / name", () => setInputValue(FIELD_IDS.middleName, data.middleName)],
+            ["lastName", "Last name", () => setInputValue(FIELD_IDS.lastName, data.lastName)],
+            ["generation", "Suffix", () => setSelectValue(FIELD_IDS.generation, data.generation)],
+            ["address", "Street address", () => setInputValue(FIELD_IDS.address, data.address)],
+            ["city", "City", () => setInputValue(FIELD_IDS.city, data.city)],
+            ["state", "State", () => setSelectValue(FIELD_IDS.state, data.state.toUpperCase())],
+            ["zip", "ZIP code", () => setInputValue(FIELD_IDS.zip, data.zip)],
+            ["ssn", "SSN / ITIN", () => fillSSN(data.ssn)],
+            ["email", "Email", () => setInputValue(FIELD_IDS.email, data.email)],
+            ["reportNumber", "Report number", () => setInputValue(FIELD_IDS.reportNumber, data.reportNumber)]
+        ];
+        for (const [name, label, fill] of mapping) {
+            if (!data[name]) continue;
+            const error = fill();
+            if (error) issues.push(label + ": " + error);
+            else succeeded.push(label);
         }
-
-
-        if (data.middleName) {
-
-            if (
-                setInputValue(
-                    FIELD_IDS.middleName,
-                    data.middleName
-                )
-            ) {
-
-                filled.push(
-                    "Middle Initial"
-                );
-
-            }
-
+        if (data.email && !issues.some((message) => message.startsWith("Email:"))) {
+            const confirmationError = setInputValue(FIELD_IDS.emailConfirm, data.email);
+            if (confirmationError) issues.push("Confirm email: " + confirmationError);
         }
-
-
-        if (data.lastName) {
-
-            if (
-                setInputValue(
-                    FIELD_IDS.lastName,
-                    data.lastName
-                )
-            ) {
-
-                filled.push(
-                    "Last Name"
-                );
-
-            }
-
+        if (data.dob) issues.push("Date of birth: no Experian field mapping configured; enter manually if needed.");
+        const terms = getTarget(FIELD_IDS.terms);
+        if (terms instanceof HTMLInputElement && !terms.checked) {
+            issues.push("Terms & Conditions: review and accept manually.");
         }
-
-
-        /*
-         * GENERATION
-         */
-
-        if (data.generation) {
-
-            if (
-                setSelectValue(
-                    FIELD_IDS.generation,
-                    data.generation
-                )
-            ) {
-
-                filled.push(
-                    "Generation"
-                );
-
-            } else {
-
-                missing.push(
-                    "Generation"
-                );
-
-            }
-
-        }
-
-
-        /*
-         * ADDRESS
-         */
-
-        if (data.address) {
-
-            if (
-                setInputValue(
-                    FIELD_IDS.address,
-                    data.address
-                )
-            ) {
-
-                filled.push(
-                    "Address"
-                );
-
-            }
-
-        }
-
-
-        /*
-         * CITY
-         */
-
-        if (data.city) {
-
-            if (
-                setInputValue(
-                    FIELD_IDS.city,
-                    data.city
-                )
-            ) {
-
-                filled.push(
-                    "City"
-                );
-
-            }
-
-        }
-
-
-        /*
-         * STATE
-         */
-
-        if (data.state) {
-
-            if (
-                setSelectValue(
-                    FIELD_IDS.state,
-                    data.state
-                )
-            ) {
-
-                filled.push(
-                    "State"
-                );
-
-            } else {
-
-                missing.push(
-                    "State"
-                );
-
-            }
-
-        }
-
-
-        /*
-         * ZIP
-         */
-
-        if (data.zip) {
-
-            if (
-                setInputValue(
-                    FIELD_IDS.zip,
-                    data.zip
-                )
-            ) {
-
-                filled.push(
-                    "ZIP"
-                );
-
-            }
-
-        }
-
-
-        /*
-         * SSN
-         */
-
-        if (data.ssn) {
-
-            if (
-                fillSSN(
-                    data.ssn
-                )
-            ) {
-
-                filled.push(
-                    "SSN"
-                );
-
-            } else {
-
-                missing.push(
-                    "SSN"
-                );
-
-            }
-
-        }
-
-
-        /*
-         * EMAIL
-         */
-
-        if (data.email) {
-
-            if (
-                setInputValue(
-                    FIELD_IDS.email,
-                    data.email
-                )
-            ) {
-
-                filled.push(
-                    "Email"
-                );
-
-            }
-
-
-            setInputValue(
-                FIELD_IDS.emailConfirm,
-                data.email
-            );
-
-        }
-
-
-        /*
-         * REPORT NUMBER
-         */
-
-        if (data.reportNumber) {
-
-            if (
-                setInputValue(
-                    FIELD_IDS.reportNumber,
-                    data.reportNumber
-                )
-            ) {
-
-                filled.push(
-                    "Report Number"
-                );
-
-            }
-
-        }
-
-
-        /*
-         * TERMS
-         */
-
-        const terms =
-            document.getElementById(
-                FIELD_IDS.terms
-            );
-
-
-        if (
-            terms &&
-            !terms.checked
-        ) {
-
-            terms.click();
-
-            filled.push(
-                "Terms & Conditions"
-            );
-
-        }
-
-
-        return {
-            filled,
-            missing
-        };
-
+        return { succeeded, issues };
     }
 
-
-    /* =====================================================
-       SHOW FILL RESULT
-       ===================================================== */
-
-    function showFillResult(result) {
-
-        status.style.display =
-            "block";
-
-
-        let message =
-            "<strong>Experian form updated.</strong>";
-
-
-        if (
-            result.filled.length
-        ) {
-
-            message +=
-                "<br><br><strong>Filled:</strong> " +
-                result.filled.join(", ");
-
-        }
-
-
-        if (
-            result.missing.length
-        ) {
-
-            message +=
-                "<br><br><strong>Not filled / needs attention:</strong> " +
-                result.missing.join(", ");
-
-        }
-
-
-        status.innerHTML =
-            message;
-
+    function openPanel() {
+        lastFocused = document.activeElement;
+        wasPageOverflow = document.documentElement.style.overflow;
+        document.documentElement.style.overflow = "hidden";
+        overlay.hidden = false;
+        $("launcher").hidden = true;
+        const count = detectFormFields();
+        setFormState(
+            count ? "Experian fields detected" : "Experian form not detected",
+            count ? count + " core fields found on this page. Form submission is manual." : "Open the correct Experian form before filling."
+        );
+        raw.focus();
     }
-
-
-    /* =====================================================
-       CLEAR EVERYTHING
-       ===================================================== */
+    function closePanel() {
+        overlay.hidden = true;
+        $("launcher").hidden = false;
+        document.documentElement.style.overflow = wasPageOverflow;
+        const ssn = inputs.get("ssn");
+        ssn.type = "password";
+        $("toggle-ssn").textContent = "Show";
+        $("toggle-ssn").setAttribute("aria-label", "Show SSN");
+        if (lastFocused && typeof lastFocused.focus === "function") lastFocused.focus();
+        else $("launcher").focus();
+    }
 
     function clearEverything() {
-
-        rawInput.value =
-            "";
-
-
-        Object.keys(
-            REVIEW_FIELDS
-        ).forEach(field => {
-
-            const element =
-                document.getElementById(
-                    REVIEW_FIELDS[field]
-                );
-
-
-            if (element) {
-
-                element.value =
-                    "";
-
-            }
-
-        });
-
-
-        reviewPanel.style.display =
-            "none";
-
-
-        warning.style.display =
-            "none";
-
-
-        status.style.display =
-            "none";
-
-
-        status.innerHTML =
-            "";
-
+        raw.value = "";
+        $("char-count").textContent = "0 characters";
+        for (const [name, input] of inputs) {
+            input.value = "";
+            clearFieldError(name);
+        }
+        const ssn = inputs.get("ssn");
+        ssn.type = "password";
+        $("toggle-ssn").textContent = "Show";
+        $("toggle-ssn").setAttribute("aria-label", "Show SSN");
+        reviewReady = false;
+        reviewContent.hidden = true;
+        emptyState.hidden = false;
+        $("fill").disabled = true;
+        setStep(1);
+        setFormState("Panel cleared", "Experian's form itself has not been changed.");
+        notify("info", "Client data cleared", "Paste and review another client's information.");
+        raw.focus();
     }
 
-
-    /* =====================================================
-       PARSE BUTTON
-       ===================================================== */
-
-    parseButton.addEventListener(
-        "click",
-        function () {
-
-            const raw =
-                rawInput.value.trim();
-
-
-            if (!raw) {
-
-                status.style.display =
-                    "block";
-
-
-                status.innerHTML =
-                    "<strong>Paste client information first.</strong>";
-
+    function parseAction() {
+        try {
+            if (!raw.value.trim()) {
+                notify("warning", "Nothing to parse", "Paste client information into the text box first.");
+                raw.focus();
                 return;
-
             }
-
-
-            const data =
-                parseRawData(raw);
-
-
-            console.log(
-                "[Experian Parser] Parsed data:",
-                data
-            );
-
-
+            const data = parseRawData(raw.value);
+            if (!Object.values(data).some(Boolean)) {
+                notify("error", "No details recognized", "Check the format or use labels such as First Name: and Address:.");
+                return;
+            }
             loadReview(data);
-
+        } catch (_error) {
+            notify("error", "Unable to parse data", "Review the pasted format and try again.");
         }
-    );
+    }
 
-
-    /* =====================================================
-       FILL BUTTON
-       ===================================================== */
-
-    fillButton.addEventListener(
-        "click",
-        function () {
-
-            const data =
-                readReview();
-
-
-            /*
-             * Require basic identifying
-             * information before filling.
-             */
-
-            if (
-                !data.firstName ||
-                !data.lastName
-            ) {
-
-                status.style.display =
-                    "block";
-
-
-                status.innerHTML =
-                    "<strong>First Name and Last Name are required before filling.</strong>";
-
+    function fillAction() {
+        if (!reviewReady) {
+            notify("warning", "Parse data first", "Review the parsed fields before filling.");
+            return;
+        }
+        const data = readReview();
+        const validationErrors = validate(data);
+        for (const name of inputs.keys()) clearFieldError(name);
+        if (validationErrors.length) {
+            validationErrors.forEach(([name, message]) => showFieldError(name, message));
+            showReviewMessage(validationErrors.length + " field(s) need correction before filling.", "error");
+            notify("error", "Please fix highlighted fields", validationErrors.map(([name]) => LABELS[name]).join(", "));
+            inputs.get(validationErrors[0][0]).focus();
+            return;
+        }
+        if (!detectFormFields()) {
+            notify("error", "Experian form not found", "Open the correct Experian form on this page and try again.");
+            setFormState("Form not found", "Nothing was filled. Your reviewed details are still available.");
+            return;
+        }
+        try {
+            const result = fillExperian(data);
+            if (!result.succeeded.length) {
+                showReviewMessage("No fields could be filled. Verify you are on the correct Experian form.", "error");
+                setFormState("No fields updated", "No changes were submitted.");
+                notify("error", "Unable to fill form", "None of the reviewed fields matched writable form fields.");
                 return;
-
             }
-
-
-            const result =
-                fillExperian(data);
-
-
-            showFillResult(result);
-
-        }
-    );
-
-
-    /* =====================================================
-       CLEAR BUTTON
-       ===================================================== */
-
-    clearButton.addEventListener(
-        "click",
-        clearEverything
-    );
-
-
-    /* =====================================================
-       OPEN BUTTON
-       ===================================================== */
-
-    launchButton.addEventListener(
-        "click",
-        openPanel
-    );
-
-
-    /* =====================================================
-       CLOSE BUTTON
-       ===================================================== */
-
-    closeButton.addEventListener(
-        "click",
-        closePanel
-    );
-
-
-    /* =====================================================
-       CLICK OUTSIDE
-       ===================================================== */
-
-    overlay.addEventListener(
-        "click",
-        function (event) {
-
-            if (
-                event.target === overlay
-            ) {
-
-                closePanel();
-
+            setStep(3);
+            const summary = result.succeeded.length + " field(s) filled.";
+            if (result.issues.length) {
+                showReviewMessage(summary + " Check: " + result.issues.join(" "), "warning");
+                notify("warning", "Partially filled", summary + " Review the attention items before proceeding.");
+            } else {
+                showReviewMessage(summary + " Verify the form before submitting. No form was submitted.", "");
+                notify("success", "Experian form filled", summary + " Double-check details before submitting manually.");
             }
-
+            setFormState("Filled: " + result.succeeded.length + " · Needs attention: " + result.issues.length,
+                "Review the Experian form. Submission and accepting terms are manual.");
+        } catch (_error) {
+            showReviewMessage("Unexpected fill error. Confirm each field on the Experian page.", "error");
+            notify("error", "Form update interrupted", "Check the Experian fields for partial changes.");
         }
-    );
+    }
 
-
-    /* =====================================================
-       ESCAPE KEY
-       ===================================================== */
-
-    document.addEventListener(
-        "keydown",
-        function (event) {
-
-            if (
-                event.key === "Escape" &&
-                overlay.style.display === "flex"
-            ) {
-
-                closePanel();
-
+    $("launcher").addEventListener("click", openPanel);
+    $("close").addEventListener("click", closePanel);
+    $("parse").addEventListener("click", parseAction);
+    $("fill").addEventListener("click", fillAction);
+    $("clear").addEventListener("click", clearEverything);
+    raw.addEventListener("input", () => {
+        $("char-count").textContent = raw.value.length.toLocaleString() + " characters";
+    });
+    raw.addEventListener("keydown", (event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+            event.preventDefault();
+            parseAction();
+        }
+    });
+    overlay.addEventListener("click", (event) => {
+        if (event.target === overlay) closePanel();
+    });
+    shadow.addEventListener("keydown", (event) => {
+        if (overlay.hidden) return;
+        if (event.key === "Escape") {
+            event.preventDefault();
+            closePanel();
+        } else if (event.key === "Tab") {
+            const focusable = Array.from(dialog.querySelectorAll("button:not([disabled]), input:not([disabled]), textarea:not([disabled])"))
+                .filter((node) => node.getClientRects().length);
+            if (!focusable.length) return;
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && shadow.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && shadow.activeElement === last) {
+                event.preventDefault();
+                first.focus();
             }
-
         }
-    );
-
-
-    /* =====================================================
-       CTRL + ENTER = PARSE
-       ===================================================== */
-
-    rawInput.addEventListener(
-        "keydown",
-        function (event) {
-
-            if (
-                event.ctrlKey &&
-                event.key === "Enter"
-            ) {
-
-                parseButton.click();
-
-            }
-
-        }
-    );
-
-
-    /* =====================================================
-       PREVENT DUPLICATE INJECTION
-       ===================================================== */
-
-    console.log(
-        "[Experian Parser] Loaded successfully."
-    );
-
+    });
 })();
