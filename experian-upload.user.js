@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Experian Client Data Parser & Autofill
 // @namespace    CRC Tools
-// @version      3.2
+// @version      3.3
 // @description  Paste, parse, review, and fill Experian forms with validation and accessible notifications.
 // @match        https://*.experian.com/*
 // @grant        none
@@ -283,7 +283,7 @@ Email: jane@example.com"></textarea>
                 <div id="review-content" hidden>
                     <div id="review-message" role="status"><span class="message-icon" aria-hidden="true">i</span><span id="review-message-text"></span></div>
                     <div id="name-assist" hidden>
-                        <strong>Name split (verify):</strong>
+                        <strong id="name-source">Choose name split:</strong>
                         <div id="name-options" role="group" aria-label="Choose how to split an ambiguous full name"></div>
                     </div>
                     <div id="review-fields"></div>
@@ -503,11 +503,6 @@ Email: jane@example.com"></textarea>
     // A three-part name cannot reliably reveal whether its second word is
     // a compound given name, middle name, or part of a family name.
     // Offer in-place interpretations rather than silently asserting one.
-    const COMPOUND_FIRST_NAMES = new Set([
-        "anne marie", "anna maria", "mary ann", "mary anne", "mary jane",
-        "mary grace", "mary rose", "maria clara", "marie claire",
-        "jean pierre", "john paul", "rose marie", "ann marie"
-    ]);
     function nameInterpretationCandidates(line) {
         const words = normalizeText(line).replace(/,/g, " ").split(" ").filter(Boolean);
         if (words.length < 3) return null;
@@ -533,14 +528,14 @@ Email: jane@example.com"></textarea>
                 values: { firstName: words[0], middleName: words.slice(1, -2).join(" "), lastName: words.slice(-2).join(" "), generation }
             }
         ];
-        const initial = COMPOUND_FIRST_NAMES.has(words.slice(0, 2).join(" ").toLowerCase())
-            ? "firstTwo" : "middle";
-        return { choices, initial };
+        return { source: normalizeText(line), choices };
     }
     function parseName(line) {
         const candidate = nameInterpretationCandidates(line);
         if (candidate) {
-            return { ...candidate.choices.find((choice) => choice.key === candidate.initial).values };
+            // Do not infer which words are first, middle, or last.
+            // Leave the split empty until the user chooses or types it.
+            return { firstName: "", middleName: "", lastName: "", generation: candidate.choices[0].values.generation };
         }
         const words = normalizeText(line).split(" ").filter(Boolean);
         if (words.length < 2) return null;
@@ -670,6 +665,7 @@ Email: jane@example.com"></textarea>
         nameInterpretations = suggestions || null;
         container.hidden = !suggestions;
         if (!suggestions) return;
+        $("name-source").textContent = "Full name: " + suggestions.source + " — choose or edit:";
         const syncButtons = (selected) => {
             buttons.querySelectorAll("button").forEach((button) => {
                 button.setAttribute("aria-pressed", String(button.dataset.choice === selected));
@@ -696,7 +692,7 @@ Email: jane@example.com"></textarea>
             });
             buttons.appendChild(button);
         }
-        syncButtons(suggestions.initial);
+        syncButtons(null);
     }
 
     function loadReview(data) {
@@ -714,8 +710,10 @@ Email: jane@example.com"></textarea>
         const count = Object.values(data).filter(Boolean).length;
         const required = data.firstName && data.lastName;
         showReviewMessage(
-            count + " of 12 fields detected. " + (required ? "Review values carefully, then fill the form." : "First and last name need attention before filling."),
-            required ? "" : "warning"
+            data.nameSuggestions
+                ? "This full name is ambiguous. Choose its split above or type first, middle, and last names manually."
+                : count + " of 12 fields detected. " + (required ? "Review values carefully, then fill the form." : "First and last name need attention before filling."),
+            data.nameSuggestions || !required ? "warning" : ""
         );
         setFormState("Review your data", "The parser may not recognize every format; verify all fields.");
         notify(required ? "success" : "warning", "Parsing complete", count + " fields detected. Confirm the details on the right.");
@@ -920,7 +918,7 @@ Email: jane@example.com"></textarea>
                 return;
             }
             const data = parseRawData(raw.value);
-            if (!Object.values(data).some(Boolean)) {
+            if (!Object.values(data).some(Boolean) && !data.nameSuggestions) {
                 notify("error", "No details recognized", "Check the format or use labels such as First Name: and Address:.");
                 return;
             }
